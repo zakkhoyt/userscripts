@@ -1,7 +1,39 @@
 
-
+# TODOs
+* [ ] p1 - additional modifier key to control leading `* ` in markdown list output
 
 # IDEAS
+
+
+## Youtube 
+
+### channel title
+* desired format for videos: `Youtube: <channel_name> - <video_title>`
+* desired format for videos: `Youtube: PSVR2 Without Parole - PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!">PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!`
+
+**Example**
+Youtube video: `https://www.youtube.com/watch?v=LI6OhRtqyXw`
+
+channel_name: `PSVR2 Without Parole`
+```html
+<a class="yt-simple-endpoint style-scope yt-formatted-string" spellcheck="false" href="/@WithoutParole">PSVR2 Without Parole</a>
+```
+
+video_title: PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!
+```html
+<yt-formatted-string force-default-style="" class="style-scope ytd-watch-metadata" title="PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!">PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!</yt-formatted-string>
+```
+
+
+### timestamped url
+* For popup menu on youtube video, try to add entry for timestamped URL
+  * url: `https://www.youtube.com/watch?v=LI6OhRtqyXw`
+  * timestamped url (short): `https://youtu.be/LI6OhRtqyXw?t=283`
+  * timestamped url (seconds): `https://youtu.be/LI6OhRtqyXw?t=283s`
+  * timestamped url (minutes, seconds): `https://youtu.be/LI6OhRtqyXw?t=4m43s`
+* the youtube player has a context menu: `Copy video URL at current time`
+* Maybe we can read the elapsed of the video player to compose a url ourselves
+
 ## Special formatting for GitHub links
 
 Format for github `repo` urls:
@@ -171,8 +203,6 @@ Action Items
 * [X] ~~*URL shortening (esp amazong)*~~ [2025-11-01]
 * [X] ~~*all on page (indented)*~~ [2025-11-01]
 * [X] ~~*all on page (outdented)*~~ [2025-11-01]
-
-econdary Goals
 
 * [X] ~~*if our isDebug flag == true, when writing each console log also write it to some local file, on disk, where you have access to read it.*~~ [2025-11-02] 
     * Be sure to use proper timestamping for each log line. 
