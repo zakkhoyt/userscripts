@@ -233,7 +233,8 @@ for source_dir in "${source_dirs[@]}"; do
 done
 
 if [[ -z "${scripting_utilities_found:-}" ]]; then
-  echo "ERROR: Cannot find .zsh_scripting_utilities in any expected location:\n${(F)source_dirs[@]}" >&2 && exit 1
+  echo "ERROR: Cannot find .zsh_scripting_utilities in any expected location:
+${(F)source_dirs[@]}" >&2 && exit 1
 fi
 ```
 

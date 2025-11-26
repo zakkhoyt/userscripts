@@ -560,3 +560,22 @@ extension [String] {
 * `https://cli.github.com/manual/gh_api` => [GitHub: GH CLI Manual](https://cli.github.com/manual/gh_api)
 
 
+---
+
+
+Let;s explore adding some ViolentMonkey preferences for this script\x1B[1m
+I'd like to start with something small/easy like what which format is used for the `alt+z+click`
+
+What will this look like? What will this add to the code? Any unforseen consequences?
+
+
+
+[GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+[GitHub: Mobile - Hatch Baby](https://github.com/hatch-baby/mobile)
+[GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+[GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+[hatch-baby/mobile: Hatch Mobile](https://github.com/hatch-baby/mobile)
+
+
+URL: [GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+LRU: [GitHub: Mobile - Hatch Baby](https://github.com/hatch-baby/mobile)

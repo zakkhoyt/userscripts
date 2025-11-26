@@ -7,6 +7,9 @@
 // @match        *://*/*
 // @grant        GM_setClipboard
 // @grant        GM_registerMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_unregisterMenuCommand
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -136,6 +139,18 @@
         }
     });
 
+    // Alt+Z title preference options (first element is default)
+    const ALT_Z_TITLE_PREF_KEY = 'markdown_linker.altz_title_source';
+    const ALT_Z_TITLE_OPTIONS = [
+        { id: 'url-forward', label: 'URL (front)' },
+        { id: 'url-reverse', label: 'URL (reverse)' },
+        { id: 'selection', label: 'Selection' },
+        { id: 'anchor', label: 'Anchor text' },
+        { id: 'page', label: 'Page title' }
+    ];
+    let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+    let altZMenuCommandId = null;
+
     // ============================================================================
     // LOGGING UTILITIES
     // ============================================================================
@@ -200,7 +215,114 @@
         return obj && obj[prop] ? obj[prop] : 'null';
     }
 
+    // ============================================================================
+    // USER PREFERENCES (ALT+Z TITLE SOURCE)
+    // ============================================================================
+
+    /**
+     * Finds the metadata for a given Alt+Z title option ID
+     * @param {string} optionId - Identifier stored in preferences
+     * @returns {{id: string, label: string}} Matching option (defaults if not found)
+     */
+    function getAltZOption(optionId) {
+        return ALT_Z_TITLE_OPTIONS.find((option) => option.id === optionId) || ALT_Z_TITLE_OPTIONS[0];
+    }
+
+    /**
+     * Loads the persisted Alt+Z title preference from ViolentMonkey storage
+     * Falls back to default when storage is unavailable or value is invalid
+     * @returns {string} Option ID representing the user's preference
+     */
+    function loadAltZTitlePreference() {
+        logFunctionBegin('loadAltZTitlePreference');
+        let storedValue = ALT_Z_TITLE_OPTIONS[0].id;
+
+        if (typeof GM_getValue === 'function') {
+            try {
+                storedValue = GM_getValue(ALT_Z_TITLE_PREF_KEY, storedValue);
+            } catch (error) {
+                logWarn(`Failed to load Alt+Z preference: ${error}`);
+            }
+        }
+
+        if (!ALT_Z_TITLE_OPTIONS.some((option) => option.id === storedValue)) {
+            logWarn(`Alt+Z preference "${storedValue}" invalid, reverting to default`);
+            storedValue = ALT_Z_TITLE_OPTIONS[0].id;
+        }
+
+        log(`Loaded Alt+Z title preference: ${storedValue}`);
+        logFunctionEnd('loadAltZTitlePreference');
+        return storedValue;
+    }
+
+    /**
+     * Persists the current Alt+Z preference and refreshes the menu command label
+     */
+    function persistAltZTitlePreference() {
+        logFunctionBegin('persistAltZTitlePreference');
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(ALT_Z_TITLE_PREF_KEY, altZTitlePreference);
+            } catch (error) {
+                logWarn(`Failed to persist Alt+Z preference: ${error}`);
+            }
+        }
+        registerAltZTitleMenuCommand();
+        logFunctionEnd('persistAltZTitlePreference');
+    }
+
+    /**
+     * Registers (or re-registers) the ViolentMonkey menu command for cycling Alt+Z sources
+     */
+    function registerAltZTitleMenuCommand() {
+        logFunctionBegin('registerAltZTitleMenuCommand');
+        if (typeof GM_registerMenuCommand !== 'function') {
+            log('GM_registerMenuCommand unavailable, skipping menu registration');
+            logFunctionEnd('registerAltZTitleMenuCommand');
+            return;
+        }
+
+        if (altZMenuCommandId && typeof GM_unregisterMenuCommand === 'function') {
+            try {
+                GM_unregisterMenuCommand(altZMenuCommandId);
+            } catch (error) {
+                logWarn(`Failed to unregister previous menu command: ${error}`);
+            }
+        }
+
+        const optionLabel = getAltZOption(altZTitlePreference).label;
+        const menuLabel = `Alt+Z title: ${optionLabel} (click to cycle)`;
+        altZMenuCommandId = GM_registerMenuCommand(menuLabel, cycleAltZTitlePreference);
+        logFunctionEnd('registerAltZTitleMenuCommand');
+    }
+
+    /**
+     * Cycles through Alt+Z title options and persists the newly selected value
+     */
+    function cycleAltZTitlePreference() {
+        logFunctionBegin('cycleAltZTitlePreference');
+        const currentIndex = ALT_Z_TITLE_OPTIONS.findIndex((option) => option.id === altZTitlePreference);
+        const nextIndex = (currentIndex + 1) % ALT_Z_TITLE_OPTIONS.length;
+        altZTitlePreference = ALT_Z_TITLE_OPTIONS[nextIndex].id;
+        log(`Alt+Z preference changed to: ${altZTitlePreference}`);
+        persistAltZTitlePreference();
+        const optionLabel = getAltZOption(altZTitlePreference).label;
+        showNotification(`Alt+Z title source: ${optionLabel}`);
+        logFunctionEnd('cycleAltZTitlePreference');
+    }
+
+    /**
+     * Initializes Alt+Z preference state and registers control surfaces
+     */
+    function initializeAltZPreference() {
+        logFunctionBegin('initializeAltZPreference');
+        altZTitlePreference = loadAltZTitlePreference();
+        registerAltZTitleMenuCommand();
+        logFunctionEnd('initializeAltZPreference');
+    }
+
     log('begin script');
+    initializeAltZPreference();
 
     // ============================================================================
     // URL VALIDATION
@@ -559,6 +681,18 @@
     }
 
     /**
+     * Clears cached selection memory so stale highlights are not reused
+     * @param {string} [reason='unspecified'] - Optional context for log output
+     */
+    function clearSelectionCache(reason = 'unspecified') {
+        logFunctionBegin('clearSelectionCache');
+        log(`Clearing selection cache (reason: ${reason})`);
+        lastNonEmptySelection = null;
+        lastSelectionTimestamp = 0;
+        logFunctionEnd('clearSelectionCache');
+    }
+
+    /**
      * Gets the current page's title from document
      * @returns {string|null} Page title or null if empty
      * 
@@ -816,10 +950,47 @@
     // ============================================================================
 
     /**
-     * Automatically infers the best title for a markdown link
-     * Priority order: selected text > anchor link text > page title
-     * Used by Alt+Z+Click quick-copy feature (no menu shown)
+     * Returns an ordered list of Alt+Z sources honoring the persisted preference first
+     * @returns {string[]} Array of source IDs in priority order
+     */
+    function getAltZSourceOrder() {
+        const remaining = ALT_Z_TITLE_OPTIONS.map((option) => option.id).filter((id) => id !== altZTitlePreference);
+        return [altZTitlePreference].concat(remaining);
+    }
+
+    /**
+     * Retrieves a title based on the requested Alt+Z source identifier
+     * @param {string} sourceId - Identifier defined in ALT_Z_TITLE_OPTIONS
+     * @param {HTMLElement|null} anchor - Anchor context (if any)
+     * @param {string|null} url - Target URL for link
+     * @returns {string|null} Title from the specified source or null
+     */
+    function getTitleFromSource(sourceId, anchor, url) {
+        switch (sourceId) {
+            case 'selection':
+                const selectionText = getSelectedText();
+                if (selectionText) {
+                    clearSelectionCache('auto-infer consumed selection');
+                }
+                return selectionText;
+            case 'anchor':
+                return anchor ? getLinkText(anchor) : null;
+            case 'page':
+                return getPageTitle();
+            case 'url-forward':
+                return url ? getUrlComponentTitle(url) : null;
+            case 'url-reverse':
+                return url ? getUrlComponentTitle(url, { direction: 'reverse' }) : null;
+            default:
+                logWarn(`Unknown Alt+Z source requested: ${sourceId}`);
+                return null;
+        }
+    }
+
+    /**
+     * Automatically infers the best title for a markdown link based on preference order
      * @param {HTMLElement|null} anchor - The anchor element if clicking on a link, null otherwise
+     * @param {string|null} url - Target URL associated with the action
      * @returns {string|null} The inferred title or null if no title source available
      * 
      * This function encapsulates the title selection logic used in auto-infer mode
@@ -827,61 +998,21 @@
      */
     function getAutoInferredTitle(anchor, url) {
         logFunctionBegin('getAutoInferredTitle');
-        log('Will attempt to auto-infer title in priority order: selected > anchor > page');
-        
-        // Priority 1: Selected text on page
-        log('Will check for selected text (Priority 1)');
-        const selectedText = getSelectedText();
-        if (selectedText) {
-            log(`Did find selected text: "${selectedText}"`);
-            logFunctionEnd('getAutoInferredTitle');
-            return selectedText;
-        }
-        log('No selected text available');
-        
-        // Priority 2: Anchor link text (if clicking on an anchor)
-        if (anchor) {
-            log('Will check for anchor link text (Priority 2)');
-            const linkText = getLinkText(anchor);
-            if (linkText) {
-                log(`Did find anchor link text: "${linkText}"`);
-                logFunctionEnd('getAutoInferredTitle');
-                return linkText;
-            }
-            log('No anchor link text available');
-        } else {
-            log('Not on an anchor, skipping Priority 2');
-        }
-        
-        // Priority 3: Page title (fallback)
-        log('Will check for page title (Priority 3 - fallback)');
-        const pageTitle = getPageTitle();
-        if (pageTitle) {
-            log(`Did find page title: "${pageTitle}"`);
-            logFunctionEnd('getAutoInferredTitle');
-            return pageTitle;
-        }
-        log('No page title available - cannot auto-infer title');
-        
-        if (url) {
-            log('Will check URL component title (Priority 4 - fallback)');
-            const urlComponentTitle = getUrlComponentTitle(url);
-            if (urlComponentTitle) {
-                log(`Did build URL component title: "${urlComponentTitle}"`);
-                logFunctionEnd('getAutoInferredTitle');
-                return urlComponentTitle;
-            }
-            log('URL component title unavailable, trying reverse order');
+        const sourceOrder = getAltZSourceOrder();
+        log(`Will attempt to auto-infer title in order: ${sourceOrder.join(' > ')}`);
 
-            const urlComponentTitleReverse = getUrlComponentTitle(url, { direction: 'reverse' });
-            if (urlComponentTitleReverse) {
-                log(`Did build reverse URL component title: "${urlComponentTitleReverse}"`);
+        for (let i = 0; i < sourceOrder.length; i += 1) {
+            const sourceId = sourceOrder[i];
+            const title = getTitleFromSource(sourceId, anchor, url);
+            if (title) {
+                log(`Selected "${title}" from source ${sourceId} (priority ${i + 1})`);
                 logFunctionEnd('getAutoInferredTitle');
-                return urlComponentTitleReverse;
+                return title;
             }
-            log('Reverse URL component title unavailable');
+            log(`Source ${sourceId} produced no title`);
         }
-        
+
+        log('No auto-infer sources produced a title');
         logFunctionEnd('getAutoInferredTitle');
         return null;
     }
@@ -1469,7 +1600,14 @@
         const selectedText = getSelectedText();
         if (selectedText) {
             log(`Did get selected text, adding to options: "${selectedText}"`);
-            options.push({ label: `Selection: ${selectedText}`, getValue: () => selectedText });
+            const selectionOptionValue = selectedText;
+            options.push({
+                label: `Selection: ${selectionOptionValue}`,
+                getValue: () => {
+                    clearSelectionCache('menu selection used');
+                    return selectionOptionValue;
+                }
+            });
         } else {
             log('No selected text available');
         }
