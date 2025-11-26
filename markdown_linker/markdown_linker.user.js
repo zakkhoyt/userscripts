@@ -144,7 +144,6 @@
     const ALT_Z_TITLE_OPTIONS = [
         { id: 'url-forward', label: 'URL (front)' },
         { id: 'url-reverse', label: 'URL (reverse)' },
-        { id: 'selection', label: 'Selection' },
         { id: 'anchor', label: 'Anchor text' },
         { id: 'page', label: 'Page title' }
     ];
@@ -967,12 +966,6 @@
      */
     function getTitleFromSource(sourceId, anchor, url) {
         switch (sourceId) {
-            case 'selection':
-                const selectionText = getSelectedText();
-                if (selectionText) {
-                    clearSelectionCache('auto-infer consumed selection');
-                }
-                return selectionText;
             case 'anchor':
                 return anchor ? getLinkText(anchor) : null;
             case 'page':
@@ -998,6 +991,14 @@
      */
     function getAutoInferredTitle(anchor, url) {
         logFunctionBegin('getAutoInferredTitle');
+        const selectedText = getSelectedText();
+        if (selectedText) {
+            log('Selection available, will prioritize it over preference order');
+            clearSelectionCache('auto-infer prioritized selection');
+            logFunctionEnd('getAutoInferredTitle');
+            return selectedText;
+        }
+
         const sourceOrder = getAltZSourceOrder();
         log(`Will attempt to auto-infer title in order: ${sourceOrder.join(' > ')}`);
 
