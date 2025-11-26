@@ -106,6 +106,36 @@
     let menuClickHandler = null;
     let menuEscapeHandler = null;
 
+    // Maximum age (in ms) for cached text selection reuse when clicks clear live selection
+    const SELECTION_MEMORY_MS = 15000;
+    let lastNonEmptySelection = null;
+    let lastSelectionTimestamp = 0;
+
+    // Domain overrides ensure well-known providers retain their official casing (GitHub, etc.)
+    const DOMAIN_TITLE_OVERRIDES = {
+        github: 'GitHub',
+        gitlab: 'GitLab',
+        google: 'Google',
+        amazon: 'Amazon',
+        notion: 'Notion',
+        linkedin: 'LinkedIn',
+        youtube: 'YouTube',
+        stackoverflow: 'Stack Overflow',
+        medium: 'Medium'
+    };
+
+    document.addEventListener('selectionchange', () => {
+        const selection = window.getSelection ? window.getSelection() : null;
+        if (!selection) {
+            return;
+        }
+        const selectedText = selection.toString().trim();
+        if (selectedText) {
+            lastNonEmptySelection = selectedText;
+            lastSelectionTimestamp = Date.now();
+        }
+    });
+
     // ============================================================================
     // LOGGING UTILITIES
     // ============================================================================
@@ -506,18 +536,26 @@
         logFunctionBegin('getSelectedText');
         log('Will get selection from window');
         
-        // getSelection() returns a Selection object representing user's text selection
-        // Type: Selection object (browser API)
-        // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Selection
-        const selection = window.getSelection().toString().trim();
+        const liveSelection = window.getSelection ? window.getSelection() : null;
+        const liveText = liveSelection ? liveSelection.toString().trim() : '';
+        if (liveText) {
+            lastNonEmptySelection = liveText;
+            lastSelectionTimestamp = Date.now();
+            log(`Did get live selection: "${liveText}"`);
+            logFunctionEnd('getSelectedText');
+            return liveText;
+        }
+
+        const selectionAge = Date.now() - lastSelectionTimestamp;
+        if (lastNonEmptySelection && selectionAge <= SELECTION_MEMORY_MS) {
+            log(`Did get cached selection (${selectionAge}ms old): "${lastNonEmptySelection}"`);
+            logFunctionEnd('getSelectedText');
+            return lastNonEmptySelection;
+        }
         
-        // Falsy check: empty string '' is falsy in JavaScript, so || null converts it
-        // Type: string | null
-        const result = selection || null;
-        
-        log(`Did get selection: ${result ? `"${result}"` : 'null'}`);
+        log('No selection available');
         logFunctionEnd('getSelectedText');
-        return result;
+        return null;
     }
 
     /**
@@ -567,6 +605,150 @@
         log(`Did get meta description: ${description ? `"${description}"` : 'null'}`);
         logFunctionEnd('getMetaDescription');
         return description;
+    }
+
+    // ============================================================================
+    // URL-DERIVED TITLE HELPERS
+    // ============================================================================
+
+    /**
+     * Converts camelCase, snake_case, or kebab-case segments into title case words
+     * @param {string} segment - Raw path or subdomain segment from the URL
+     * @returns {string} Human-friendly representation suitable for link titles
+     */
+    function formatPathSegment(segment) {
+        logFunctionBegin('formatPathSegment');
+        if (!segment) {
+            log('Segment empty, returning empty string');
+            logFunctionEnd('formatPathSegment');
+            return '';
+        }
+
+        const noExtension = segment.replace(/\.[a-z0-9]+$/i, '');
+        const withDelimiters = noExtension
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+        if (!withDelimiters) {
+            log('Segment collapsed after cleanup');
+            logFunctionEnd('formatPathSegment');
+            return '';
+        }
+
+        const words = withDelimiters.split(/\s+/).map((word) => {
+            const lower = word.toLowerCase();
+            if (lower === 'api') {
+                return 'API';
+            }
+            if (lower === 'cli') {
+                return 'CLI';
+            }
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        });
+
+        const result = words.join(' ');
+        log(`Formatted segment: "${result}"`);
+        logFunctionEnd('formatPathSegment');
+        return result;
+    }
+
+    /**
+     * Generates a readable brand-focused domain title from a hostname
+     * @param {string} hostname - URL hostname (e.g., docs.github.com)
+     * @returns {string|null} Domain title or null if unavailable
+     */
+    function getDomainTitleFromHostname(hostname) {
+        logFunctionBegin('getDomainTitleFromHostname');
+        if (!hostname) {
+            log('Hostname missing');
+            logFunctionEnd('getDomainTitleFromHostname');
+            return null;
+        }
+
+        const cleanHost = hostname.replace(/^www\./i, '');
+        const parts = cleanHost.split('.').filter(Boolean);
+        if (parts.length === 0) {
+            log('Hostname parts empty');
+            logFunctionEnd('getDomainTitleFromHostname');
+            return null;
+        }
+
+        parts.pop(); // remove TLD
+        if (parts.length === 0) {
+            const fallback = formatPathSegment(cleanHost);
+            log(`Only TLD present, fallback: "${fallback}"`);
+            logFunctionEnd('getDomainTitleFromHostname');
+            return fallback || cleanHost;
+        }
+
+        const brandKey = parts.pop();
+        const brandTitle = DOMAIN_TITLE_OVERRIDES[brandKey.toLowerCase()] || formatPathSegment(brandKey);
+        if (parts.length === 0) {
+            log(`No subdomains, returning brand: "${brandTitle}"`);
+            logFunctionEnd('getDomainTitleFromHostname');
+            return brandTitle;
+        }
+
+        const subdomains = parts.reverse().map(formatPathSegment).filter(Boolean);
+        if (subdomains.length === 0) {
+            log('Subdomains collapsed, returning brand only');
+            logFunctionEnd('getDomainTitleFromHostname');
+            return brandTitle;
+        }
+
+        const delimiter = subdomains.length === 1 ? ' ' : ': ';
+        const descriptor = subdomains.join(' ');
+        const domainTitle = `${brandTitle}${delimiter}${descriptor}`;
+        log(`Generated domain title: "${domainTitle}"`);
+        logFunctionEnd('getDomainTitleFromHostname');
+        return domainTitle;
+    }
+
+    /**
+     * Builds a link title using URL components (domain + first path segments)
+     * @param {string} url - Target URL
+     * @returns {string|null} Generated title or null when parsing fails
+     */
+    function getUrlComponentTitle(url, options = {}) {
+        logFunctionBegin('getUrlComponentTitle');
+        if (!url) {
+            log('URL missing, cannot build component title');
+            logFunctionEnd('getUrlComponentTitle');
+            return null;
+        }
+
+        try {
+            const direction = options.direction === 'reverse' ? 'reverse' : 'forward';
+            const urlObj = new URL(url);
+            const domainTitle = getDomainTitleFromHostname(urlObj.hostname) || urlObj.hostname;
+            const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+            const meaningfulSegments = pathSegments
+                .filter((segment) => segment && segment !== '.' && segment !== '..')
+                .map(formatPathSegment)
+                .filter(Boolean);
+
+            let orderedSegments;
+            if (direction === 'reverse') {
+                orderedSegments = meaningfulSegments.slice(-2).reverse();
+            } else {
+                orderedSegments = meaningfulSegments.slice(0, 2);
+            }
+
+            let finalTitle = domainTitle;
+            if (orderedSegments.length === 1) {
+                finalTitle = `${domainTitle}: ${orderedSegments[0]}`;
+            } else if (orderedSegments.length >= 2) {
+                finalTitle = `${domainTitle}: ${orderedSegments[0]} - ${orderedSegments[1]}`;
+            }
+
+            log(`Generated URL component title: "${finalTitle}"`);
+            logFunctionEnd('getUrlComponentTitle');
+            return finalTitle;
+        } catch (error) {
+            logWarn(`Failed to build URL component title: ${error.message}`);
+            logFunctionEnd('getUrlComponentTitle');
+            return null;
+        }
     }
 
     /**
@@ -643,7 +825,7 @@
      * This function encapsulates the title selection logic used in auto-infer mode
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Window/getSelection
      */
-    function getAutoInferredTitle(anchor) {
+    function getAutoInferredTitle(anchor, url) {
         logFunctionBegin('getAutoInferredTitle');
         log('Will attempt to auto-infer title in priority order: selected > anchor > page');
         
@@ -681,6 +863,25 @@
         }
         log('No page title available - cannot auto-infer title');
         
+        if (url) {
+            log('Will check URL component title (Priority 4 - fallback)');
+            const urlComponentTitle = getUrlComponentTitle(url);
+            if (urlComponentTitle) {
+                log(`Did build URL component title: "${urlComponentTitle}"`);
+                logFunctionEnd('getAutoInferredTitle');
+                return urlComponentTitle;
+            }
+            log('URL component title unavailable, trying reverse order');
+
+            const urlComponentTitleReverse = getUrlComponentTitle(url, { direction: 'reverse' });
+            if (urlComponentTitleReverse) {
+                log(`Did build reverse URL component title: "${urlComponentTitleReverse}"`);
+                logFunctionEnd('getAutoInferredTitle');
+                return urlComponentTitleReverse;
+            }
+            log('Reverse URL component title unavailable');
+        }
+        
         logFunctionEnd('getAutoInferredTitle');
         return null;
     }
@@ -700,7 +901,7 @@
         
         // Get the auto-inferred title using priority logic
         log('Will get auto-inferred title');
-        const title = getAutoInferredTitle(anchor);
+        const title = getAutoInferredTitle(anchor, url);
         
         if (!title) {
             log('Auto-infer failed - no title source available');
@@ -759,7 +960,7 @@
         
         // Helper to format a single item with title inference
         const formatBufferItem = (item, asList = true) => {
-            const title = getAutoInferredTitle(item.anchor);
+            const title = getAutoInferredTitle(item.anchor, item.url);
             if (!title) {
                 try {
                     const url = new URL(item.url);
@@ -1239,8 +1440,9 @@
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-size: 11px;
-            min-width: 150px;
-            max-width: 250px;
+            min-width: 180px;
+            max-width: 480px;
+            width: max-content;
         `;
         log('Did create menu element');
 
@@ -1256,7 +1458,7 @@
             const linkText = getLinkText(anchor);
             if (linkText) {
                 log(`Did get link text, adding to options: "${linkText}"`);
-                options.push({ label: `Link Text: "${truncate(linkText, 25)}"`, getValue: () => linkText });
+                options.push({ label: `Link: ${linkText}`, getValue: () => linkText });
             } else {
                 log('No link text available');
             }
@@ -1267,7 +1469,7 @@
         const selectedText = getSelectedText();
         if (selectedText) {
             log(`Did get selected text, adding to options: "${selectedText}"`);
-            options.push({ label: `Selected Text: "${truncate(selectedText, 25)}"`, getValue: () => selectedText });
+            options.push({ label: `Selection: ${selectedText}`, getValue: () => selectedText });
         } else {
             log('No selected text available');
         }
@@ -1276,9 +1478,28 @@
         const pageTitle = getPageTitle();
         if (pageTitle) {
             log(`Did get page title, adding to options: "${pageTitle}"`);
-            options.push({ label: `Page Title: "${truncate(pageTitle, 25)}"`, getValue: () => pageTitle });
+            options.push({ label: `Page: ${pageTitle}`, getValue: () => pageTitle });
         } else {
             log('No page title available');
+        }
+
+        if (capturedUrl) {
+            log('Will build URL component title option');
+            const urlComponentTitle = getUrlComponentTitle(capturedUrl);
+            if (urlComponentTitle) {
+                log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
+                options.push({ label: `URL: ${urlComponentTitle}`, getValue: () => urlComponentTitle });
+            } else {
+                log('URL component title unavailable');
+            }
+
+            const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: 'reverse' });
+            if (urlComponentTitleLRU) {
+                log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
+                options.push({ label: `LRU: ${urlComponentTitleLRU}`, getValue: () => urlComponentTitleLRU });
+            } else {
+                log('Reverse URL component title unavailable');
+            }
         }
 
         if (!isAnchor) {
@@ -1286,7 +1507,7 @@
             const metaDesc = getMetaDescription();
             if (metaDesc) {
                 log(`Did get meta description, adding to options: "${metaDesc}"`);
-                options.push({ label: `Meta Description: "${truncate(metaDesc, 25)}"`, getValue: () => metaDesc });
+                options.push({ label: `Meta: ${metaDesc}`, getValue: () => metaDesc });
             } else {
                 log('No meta description available');
             }
@@ -1294,18 +1515,18 @@
 
         // Always add custom title option
         log('Adding custom title option');
-        options.push({ label: 'Custom Title...', getValue: promptCustomTitle });
+        options.push({ label: 'Custom', getValue: promptCustomTitle });
         
         // Add separator and "All Links" options at the bottom
         log('Adding extract all links options');
         options.push({ 
-            label: 'All Links (Flat)', 
+            label: 'all (flat)', 
             getValue: extractAllLinksFlat,
             isAllLinks: true,
             isSeparator: true  // Add visual separator above this item
         });
         options.push({ 
-            label: 'All Links (Hierarchical)', 
+            label: 'all (tree)', 
             getValue: extractAllLinksHierarchical,
             isAllLinks: true 
         });
@@ -1319,11 +1540,11 @@
             const item = document.createElement('div');
             item.textContent = option.label;
             item.style.cssText = `
-                padding: 4px 10px;
+                padding: 6px 12px;
                 cursor: pointer;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                white-space: normal;
+                line-height: 1.4;
+                word-break: break-word;
                 ${option.isSeparator ? 'border-top: 1px solid #ccc; margin-top: 4px; padding-top: 8px;' : ''}
             `;
 
@@ -1489,31 +1710,6 @@
         log('Did clear target variables');
         
         logFunctionEnd('removeMenu');
-    }
-
-    /**
-     * Truncates text to maximum length, appending '...' if needed
-     * Used to keep menu options readable with long titles
-     * @param {string} text - Text to truncate
-     * @param {number} maxLength - Maximum length before truncation
-     * @returns {string} Original or truncated text
-     * Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/substring
-     */
-    function truncate(text, maxLength) {
-        logFunctionBegin('truncate');
-        log(`Will truncate text (length ${text.length}) to max ${maxLength}`);
-        
-        let result;
-        if (text.length <= maxLength) {
-            result = text;
-            log('Text does not need truncation');
-        } else {
-            result = text.substring(0, maxLength) + '...';
-            log(`Did truncate text to: "${result}"`);
-        }
-        
-        logFunctionEnd('truncate');
-        return result;
     }
 
     // ============================================================================
