@@ -26,6 +26,11 @@ Examples:
 
 * [Portland / Columbia River](https://www.youtube.com/watch?v=9tEIBj4f378)
 
+Implementation notes:
+- `document.title` already contains the noisy prefix/suffix, so run the cleanup regex chain before applying the `Youtube: ` prefix.
+- When the DOM exposes `<meta property="og:title">`, prefer that value because it usually omits notification counters.
+- Keep fallbacks predictable: cleaned page title → anchor text → auto-generated domain-based title.
+
 ### channel title
 * desired format for videos: `Youtube: <channel_name> - <video_title>`
 * desired format for videos: `Youtube: PSVR2 Without Parole - PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!">PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!`
@@ -43,6 +48,11 @@ video_title: PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity
 <yt-formatted-string force-default-style="" class="style-scope ytd-watch-metadata" title="PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!">PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!</yt-formatted-string>
 ```
 
+Implementation notes:
+- Channel name lives under `#owner` (desktop) or `.ytd-channel-name` anchors. Query all obvious selectors, trim whitespace, and cache the first non-empty value.
+- Video titles surface via `meta[property="og:title"]`, `#title yt-formatted-string`, or the `ytd-watch-metadata` block—read them in that order.
+- If either lookup fails, fall back to the cleaned `youtube.com/watch?v=` formatting so menu entries stay deterministic.
+
 
 ### timestamped url
 * For popup menu on youtube video, try to add entry for timestamped URL
@@ -52,6 +62,11 @@ video_title: PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity
   * timestamped url (minutes, seconds): `https://youtu.be/LI6OhRtqyXw?t=4m43s`
 * the youtube player has a context menu: `Copy video URL at current time`
 * Maybe we can read the elapsed of the video player to compose a url ourselves
+
+Implementation notes:
+- The primary `<video>` element exposes `currentTime` (seconds). Read it via `document.querySelector('video')?.currentTime` when the page is active.
+- Derive variants from the same number: raw seconds (`?t=283`), suffixed seconds (`?t=283s`), or human-readable `?t=4m43s` by converting with integer division/modulo.
+- Prefer the short `youtu.be/<id>` domain for timestamped entries so links stay compact.
 
 ## Special formatting for GitHub links
 
@@ -219,20 +234,29 @@ Action Items
 
 
 # Secondary Goals
+<!--
 * [X] ~~*clean up the url. Extract info from script to form a full URL if javascript is involved. Avoid redirects.*~~ [2025-11-01] 
 * [X] ~~*URL shortening (esp amazong)*~~ [2025-11-01]
 * [X] ~~*all on page (indented)*~~ [2025-11-01]
 * [X] ~~*all on page (outdented)*~~ [2025-11-01]
+-->
 
+<!--
 * [X] ~~*if our isDebug flag == true, when writing each console log also write it to some local file, on disk, where you have access to read it.*~~ [2025-11-02] 
-    * Be sure to use proper timestamping for each log line. 
-    * We could even write a new log file each session (timestamped of course)
-    * Maybe `/tmp/userscripts/markdown_linker/logs/markdown_linker_${timestamp}.log`
-* [X] ~~*let's make `opt+z+click` (either on a anchor or off of a anchor) to automatically infer the title in this order:*~~ [2025-11-03]
-    * selected text
-    * anchor title
+  * Be sure to use proper timestamping for each log line. 
+  * We could even write a new log file each session (timestamped of course)
+  * Maybe `/tmp/userscripts/markdown_linker/logs/markdown_linker_${timestamp}.log`
+-->
 
+<!--
+* [X] ~~*let's make `opt+z+click` (either on a anchor or off of a anchor) to automatically infer the title in this order:*~~ [2025-11-03]
+  * selected text
+  * anchor title
+-->
+
+<!--
 * [X] ~~*For the opt+z+click scenario, I'd like some visualt feedback  on each click. Like a little click animation*~~ [2025-11-03]
+-->
 * [ ] success banner should preview the output (1 line truncated)
 * [ ] let's add a preference (using violentmonkey API) to let the user define their own "key shortcuts"
     * use the current as default values
