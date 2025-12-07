@@ -1,0 +1,130 @@
+{
+  "folders": [
+    {
+      "path": ".",
+      "name": "userscripts"
+    }
+  ],
+  "settings": {
+    "chatgpt.lang": "en",
+    "chat.agent.thinkingStyle": "collapsedPreview",
+    "chat.agentSessionsViewLocation": "view",
+    "chat.tools.terminal.ignoreDefaultAutoApproveRules": true,
+    "chat.tools.terminal.autoApprove": {
+      "*": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/;/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/.*/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\?/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\(.+\\)/s": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\(/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\)/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\[/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\]/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\{.+\\}/s": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\{/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\}/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\*/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\|/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\|\\|/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\$\\(/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/\\$\\{/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/&&/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/`.+`/s": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/`/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/</": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/>/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/>>/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/2>/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/2>&1/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "awk": true,
+      "chmod": true,
+      "find": true,
+      "grep": true,
+      "jq": true,
+      "sed": true,
+      "tee": true,
+      "xargs": true
+    },
+    "chat.tools.edits.autoApprove": {},
+    "chat.tools.eligibleForAutoApproval": {}
+  }
+}

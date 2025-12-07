@@ -1,1 +1,1 @@
-/Users/zakkhoyt/.ai/instructions/userscript/userscript-conventions.instructions.md
+/Users/zakkhoyt/.ai/ai_platforms/copilot/.github/instructions/userscript/userscript-conventions.instructions.md

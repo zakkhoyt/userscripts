@@ -7,6 +7,9 @@
 // @match        *://*/*
 // @grant        GM_setClipboard
 // @grant        GM_registerMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_unregisterMenuCommand
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -59,6 +62,9 @@
  * 
  * BROWSER COMPATIBILITY:
  * Tested on Firefox 144.0.2 with ViolentMonkey 2.31.0 on macOS
+ * 
+ * TODO / IDEAS:
+ *   - See sibling file: markdown_linker.user.md
  */
 
 
@@ -102,6 +108,47 @@
     // Type: Function | null
     let menuClickHandler = null;
     let menuEscapeHandler = null;
+
+    // Maximum age (in ms) for cached text selection reuse when clicks clear live selection
+    const SELECTION_MEMORY_MS = 15000;
+    let lastNonEmptySelection = null;
+    let lastSelectionTimestamp = 0;
+
+    // Domain overrides ensure well-known providers retain their official casing (GitHub, etc.)
+    const DOMAIN_TITLE_OVERRIDES = {
+        github: 'GitHub',
+        gitlab: 'GitLab',
+        google: 'Google',
+        amazon: 'Amazon',
+        notion: 'Notion',
+        linkedin: 'LinkedIn',
+        youtube: 'YouTube',
+        stackoverflow: 'Stack Overflow',
+        medium: 'Medium'
+    };
+
+    document.addEventListener('selectionchange', () => {
+        const selection = window.getSelection ? window.getSelection() : null;
+        if (!selection) {
+            return;
+        }
+        const selectedText = selection.toString().trim();
+        if (selectedText) {
+            lastNonEmptySelection = selectedText;
+            lastSelectionTimestamp = Date.now();
+        }
+    });
+
+    // Alt+Z title preference options (first element is default)
+    const ALT_Z_TITLE_PREF_KEY = 'markdown_linker.altz_title_source';
+    const ALT_Z_TITLE_OPTIONS = [
+        { id: 'url-forward', label: 'URL (front)' },
+        { id: 'url-reverse', label: 'URL (reverse)' },
+        { id: 'anchor', label: 'Anchor text' },
+        { id: 'page', label: 'Page title' }
+    ];
+    let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+    let altZMenuCommandId = null;
 
     // ============================================================================
     // LOGGING UTILITIES
@@ -167,7 +214,114 @@
         return obj && obj[prop] ? obj[prop] : 'null';
     }
 
+    // ============================================================================
+    // USER PREFERENCES (ALT+Z TITLE SOURCE)
+    // ============================================================================
+
+    /**
+     * Finds the metadata for a given Alt+Z title option ID
+     * @param {string} optionId - Identifier stored in preferences
+     * @returns {{id: string, label: string}} Matching option (defaults if not found)
+     */
+    function getAltZOption(optionId) {
+        return ALT_Z_TITLE_OPTIONS.find((option) => option.id === optionId) || ALT_Z_TITLE_OPTIONS[0];
+    }
+
+    /**
+     * Loads the persisted Alt+Z title preference from ViolentMonkey storage
+     * Falls back to default when storage is unavailable or value is invalid
+     * @returns {string} Option ID representing the user's preference
+     */
+    function loadAltZTitlePreference() {
+        logFunctionBegin('loadAltZTitlePreference');
+        let storedValue = ALT_Z_TITLE_OPTIONS[0].id;
+
+        if (typeof GM_getValue === 'function') {
+            try {
+                storedValue = GM_getValue(ALT_Z_TITLE_PREF_KEY, storedValue);
+            } catch (error) {
+                logWarn(`Failed to load Alt+Z preference: ${error}`);
+            }
+        }
+
+        if (!ALT_Z_TITLE_OPTIONS.some((option) => option.id === storedValue)) {
+            logWarn(`Alt+Z preference "${storedValue}" invalid, reverting to default`);
+            storedValue = ALT_Z_TITLE_OPTIONS[0].id;
+        }
+
+        log(`Loaded Alt+Z title preference: ${storedValue}`);
+        logFunctionEnd('loadAltZTitlePreference');
+        return storedValue;
+    }
+
+    /**
+     * Persists the current Alt+Z preference and refreshes the menu command label
+     */
+    function persistAltZTitlePreference() {
+        logFunctionBegin('persistAltZTitlePreference');
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(ALT_Z_TITLE_PREF_KEY, altZTitlePreference);
+            } catch (error) {
+                logWarn(`Failed to persist Alt+Z preference: ${error}`);
+            }
+        }
+        registerAltZTitleMenuCommand();
+        logFunctionEnd('persistAltZTitlePreference');
+    }
+
+    /**
+     * Registers (or re-registers) the ViolentMonkey menu command for cycling Alt+Z sources
+     */
+    function registerAltZTitleMenuCommand() {
+        logFunctionBegin('registerAltZTitleMenuCommand');
+        if (typeof GM_registerMenuCommand !== 'function') {
+            log('GM_registerMenuCommand unavailable, skipping menu registration');
+            logFunctionEnd('registerAltZTitleMenuCommand');
+            return;
+        }
+
+        if (altZMenuCommandId && typeof GM_unregisterMenuCommand === 'function') {
+            try {
+                GM_unregisterMenuCommand(altZMenuCommandId);
+            } catch (error) {
+                logWarn(`Failed to unregister previous menu command: ${error}`);
+            }
+        }
+
+        const optionLabel = getAltZOption(altZTitlePreference).label;
+        const menuLabel = `Alt+Z title: ${optionLabel} (click to cycle)`;
+        altZMenuCommandId = GM_registerMenuCommand(menuLabel, cycleAltZTitlePreference);
+        logFunctionEnd('registerAltZTitleMenuCommand');
+    }
+
+    /**
+     * Cycles through Alt+Z title options and persists the newly selected value
+     */
+    function cycleAltZTitlePreference() {
+        logFunctionBegin('cycleAltZTitlePreference');
+        const currentIndex = ALT_Z_TITLE_OPTIONS.findIndex((option) => option.id === altZTitlePreference);
+        const nextIndex = (currentIndex + 1) % ALT_Z_TITLE_OPTIONS.length;
+        altZTitlePreference = ALT_Z_TITLE_OPTIONS[nextIndex].id;
+        log(`Alt+Z preference changed to: ${altZTitlePreference}`);
+        persistAltZTitlePreference();
+        const optionLabel = getAltZOption(altZTitlePreference).label;
+        showNotification(`Alt+Z title source: ${optionLabel}`);
+        logFunctionEnd('cycleAltZTitlePreference');
+    }
+
+    /**
+     * Initializes Alt+Z preference state and registers control surfaces
+     */
+    function initializeAltZPreference() {
+        logFunctionBegin('initializeAltZPreference');
+        altZTitlePreference = loadAltZTitlePreference();
+        registerAltZTitleMenuCommand();
+        logFunctionEnd('initializeAltZPreference');
+    }
+
     log('begin script');
+    initializeAltZPreference();
 
     // ============================================================================
     // URL VALIDATION
@@ -503,18 +657,38 @@
         logFunctionBegin('getSelectedText');
         log('Will get selection from window');
         
-        // getSelection() returns a Selection object representing user's text selection
-        // Type: Selection object (browser API)
-        // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Selection
-        const selection = window.getSelection().toString().trim();
+        const liveSelection = window.getSelection ? window.getSelection() : null;
+        const liveText = liveSelection ? liveSelection.toString().trim() : '';
+        if (liveText) {
+            lastNonEmptySelection = liveText;
+            lastSelectionTimestamp = Date.now();
+            log(`Did get live selection: "${liveText}"`);
+            logFunctionEnd('getSelectedText');
+            return liveText;
+        }
+
+        const selectionAge = Date.now() - lastSelectionTimestamp;
+        if (lastNonEmptySelection && selectionAge <= SELECTION_MEMORY_MS) {
+            log(`Did get cached selection (${selectionAge}ms old): "${lastNonEmptySelection}"`);
+            logFunctionEnd('getSelectedText');
+            return lastNonEmptySelection;
+        }
         
-        // Falsy check: empty string '' is falsy in JavaScript, so || null converts it
-        // Type: string | null
-        const result = selection || null;
-        
-        log(`Did get selection: ${result ? `"${result}"` : 'null'}`);
+        log('No selection available');
         logFunctionEnd('getSelectedText');
-        return result;
+        return null;
+    }
+
+    /**
+     * Clears cached selection memory so stale highlights are not reused
+     * @param {string} [reason='unspecified'] - Optional context for log output
+     */
+    function clearSelectionCache(reason = 'unspecified') {
+        logFunctionBegin('clearSelectionCache');
+        log(`Clearing selection cache (reason: ${reason})`);
+        lastNonEmptySelection = null;
+        lastSelectionTimestamp = 0;
+        logFunctionEnd('clearSelectionCache');
     }
 
     /**
@@ -564,6 +738,150 @@
         log(`Did get meta description: ${description ? `"${description}"` : 'null'}`);
         logFunctionEnd('getMetaDescription');
         return description;
+    }
+
+    // ============================================================================
+    // URL-DERIVED TITLE HELPERS
+    // ============================================================================
+
+    /**
+     * Converts camelCase, snake_case, or kebab-case segments into title case words
+     * @param {string} segment - Raw path or subdomain segment from the URL
+     * @returns {string} Human-friendly representation suitable for link titles
+     */
+    function formatPathSegment(segment) {
+        logFunctionBegin('formatPathSegment');
+        if (!segment) {
+            log('Segment empty, returning empty string');
+            logFunctionEnd('formatPathSegment');
+            return '';
+        }
+
+        const noExtension = segment.replace(/\.[a-z0-9]+$/i, '');
+        const withDelimiters = noExtension
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+        if (!withDelimiters) {
+            log('Segment collapsed after cleanup');
+            logFunctionEnd('formatPathSegment');
+            return '';
+        }
+
+        const words = withDelimiters.split(/\s+/).map((word) => {
+            const lower = word.toLowerCase();
+            if (lower === 'api') {
+                return 'API';
+            }
+            if (lower === 'cli') {
+                return 'CLI';
+            }
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        });
+
+        const result = words.join(' ');
+        log(`Formatted segment: "${result}"`);
+        logFunctionEnd('formatPathSegment');
+        return result;
+    }
+
+    /**
+     * Generates a readable brand-focused domain title from a hostname
+     * @param {string} hostname - URL hostname (e.g., docs.github.com)
+     * @returns {string|null} Domain title or null if unavailable
+     */
+    function getDomainTitleFromHostname(hostname) {
+        logFunctionBegin('getDomainTitleFromHostname');
+        if (!hostname) {
+            log('Hostname missing');
+            logFunctionEnd('getDomainTitleFromHostname');
+            return null;
+        }
+
+        const cleanHost = hostname.replace(/^www\./i, '');
+        const parts = cleanHost.split('.').filter(Boolean);
+        if (parts.length === 0) {
+            log('Hostname parts empty');
+            logFunctionEnd('getDomainTitleFromHostname');
+            return null;
+        }
+
+        parts.pop(); // remove TLD
+        if (parts.length === 0) {
+            const fallback = formatPathSegment(cleanHost);
+            log(`Only TLD present, fallback: "${fallback}"`);
+            logFunctionEnd('getDomainTitleFromHostname');
+            return fallback || cleanHost;
+        }
+
+        const brandKey = parts.pop();
+        const brandTitle = DOMAIN_TITLE_OVERRIDES[brandKey.toLowerCase()] || formatPathSegment(brandKey);
+        if (parts.length === 0) {
+            log(`No subdomains, returning brand: "${brandTitle}"`);
+            logFunctionEnd('getDomainTitleFromHostname');
+            return brandTitle;
+        }
+
+        const subdomains = parts.reverse().map(formatPathSegment).filter(Boolean);
+        if (subdomains.length === 0) {
+            log('Subdomains collapsed, returning brand only');
+            logFunctionEnd('getDomainTitleFromHostname');
+            return brandTitle;
+        }
+
+        const delimiter = subdomains.length === 1 ? ' ' : ': ';
+        const descriptor = subdomains.join(' ');
+        const domainTitle = `${brandTitle}${delimiter}${descriptor}`;
+        log(`Generated domain title: "${domainTitle}"`);
+        logFunctionEnd('getDomainTitleFromHostname');
+        return domainTitle;
+    }
+
+    /**
+     * Builds a link title using URL components (domain + first path segments)
+     * @param {string} url - Target URL
+     * @returns {string|null} Generated title or null when parsing fails
+     */
+    function getUrlComponentTitle(url, options = {}) {
+        logFunctionBegin('getUrlComponentTitle');
+        if (!url) {
+            log('URL missing, cannot build component title');
+            logFunctionEnd('getUrlComponentTitle');
+            return null;
+        }
+
+        try {
+            const direction = options.direction === 'reverse' ? 'reverse' : 'forward';
+            const urlObj = new URL(url);
+            const domainTitle = getDomainTitleFromHostname(urlObj.hostname) || urlObj.hostname;
+            const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+            const meaningfulSegments = pathSegments
+                .filter((segment) => segment && segment !== '.' && segment !== '..')
+                .map(formatPathSegment)
+                .filter(Boolean);
+
+            let orderedSegments;
+            if (direction === 'reverse') {
+                orderedSegments = meaningfulSegments.slice(-2).reverse();
+            } else {
+                orderedSegments = meaningfulSegments.slice(0, 2);
+            }
+
+            let finalTitle = domainTitle;
+            if (orderedSegments.length === 1) {
+                finalTitle = `${domainTitle}: ${orderedSegments[0]}`;
+            } else if (orderedSegments.length >= 2) {
+                finalTitle = `${domainTitle}: ${orderedSegments[0]} - ${orderedSegments[1]}`;
+            }
+
+            log(`Generated URL component title: "${finalTitle}"`);
+            logFunctionEnd('getUrlComponentTitle');
+            return finalTitle;
+        } catch (error) {
+            logWarn(`Failed to build URL component title: ${error.message}`);
+            logFunctionEnd('getUrlComponentTitle');
+            return null;
+        }
     }
 
     /**
@@ -631,53 +949,71 @@
     // ============================================================================
 
     /**
-     * Automatically infers the best title for a markdown link
-     * Priority order: selected text > anchor link text > page title
-     * Used by Alt+Z+Click quick-copy feature (no menu shown)
+     * Returns an ordered list of Alt+Z sources honoring the persisted preference first
+     * @returns {string[]} Array of source IDs in priority order
+     */
+    function getAltZSourceOrder() {
+        const remaining = ALT_Z_TITLE_OPTIONS.map((option) => option.id).filter((id) => id !== altZTitlePreference);
+        return [altZTitlePreference].concat(remaining);
+    }
+
+    /**
+     * Retrieves a title based on the requested Alt+Z source identifier
+     * @param {string} sourceId - Identifier defined in ALT_Z_TITLE_OPTIONS
+     * @param {HTMLElement|null} anchor - Anchor context (if any)
+     * @param {string|null} url - Target URL for link
+     * @returns {string|null} Title from the specified source or null
+     */
+    function getTitleFromSource(sourceId, anchor, url) {
+        switch (sourceId) {
+            case 'anchor':
+                return anchor ? getLinkText(anchor) : null;
+            case 'page':
+                return getPageTitle();
+            case 'url-forward':
+                return url ? getUrlComponentTitle(url) : null;
+            case 'url-reverse':
+                return url ? getUrlComponentTitle(url, { direction: 'reverse' }) : null;
+            default:
+                logWarn(`Unknown Alt+Z source requested: ${sourceId}`);
+                return null;
+        }
+    }
+
+    /**
+     * Automatically infers the best title for a markdown link based on preference order
      * @param {HTMLElement|null} anchor - The anchor element if clicking on a link, null otherwise
+     * @param {string|null} url - Target URL associated with the action
      * @returns {string|null} The inferred title or null if no title source available
      * 
      * This function encapsulates the title selection logic used in auto-infer mode
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Window/getSelection
      */
-    function getAutoInferredTitle(anchor) {
+    function getAutoInferredTitle(anchor, url) {
         logFunctionBegin('getAutoInferredTitle');
-        log('Will attempt to auto-infer title in priority order: selected > anchor > page');
-        
-        // Priority 1: Selected text on page
-        log('Will check for selected text (Priority 1)');
         const selectedText = getSelectedText();
         if (selectedText) {
-            log(`Did find selected text: "${selectedText}"`);
+            log('Selection available, will prioritize it over preference order');
+            clearSelectionCache('auto-infer prioritized selection');
             logFunctionEnd('getAutoInferredTitle');
             return selectedText;
         }
-        log('No selected text available');
-        
-        // Priority 2: Anchor link text (if clicking on an anchor)
-        if (anchor) {
-            log('Will check for anchor link text (Priority 2)');
-            const linkText = getLinkText(anchor);
-            if (linkText) {
-                log(`Did find anchor link text: "${linkText}"`);
+
+        const sourceOrder = getAltZSourceOrder();
+        log(`Will attempt to auto-infer title in order: ${sourceOrder.join(' > ')}`);
+
+        for (let i = 0; i < sourceOrder.length; i += 1) {
+            const sourceId = sourceOrder[i];
+            const title = getTitleFromSource(sourceId, anchor, url);
+            if (title) {
+                log(`Selected "${title}" from source ${sourceId} (priority ${i + 1})`);
                 logFunctionEnd('getAutoInferredTitle');
-                return linkText;
+                return title;
             }
-            log('No anchor link text available');
-        } else {
-            log('Not on an anchor, skipping Priority 2');
+            log(`Source ${sourceId} produced no title`);
         }
-        
-        // Priority 3: Page title (fallback)
-        log('Will check for page title (Priority 3 - fallback)');
-        const pageTitle = getPageTitle();
-        if (pageTitle) {
-            log(`Did find page title: "${pageTitle}"`);
-            logFunctionEnd('getAutoInferredTitle');
-            return pageTitle;
-        }
-        log('No page title available - cannot auto-infer title');
-        
+
+        log('No auto-infer sources produced a title');
         logFunctionEnd('getAutoInferredTitle');
         return null;
     }
@@ -697,7 +1033,7 @@
         
         // Get the auto-inferred title using priority logic
         log('Will get auto-inferred title');
-        const title = getAutoInferredTitle(anchor);
+        const title = getAutoInferredTitle(anchor, url);
         
         if (!title) {
             log('Auto-infer failed - no title source available');
@@ -756,7 +1092,7 @@
         
         // Helper to format a single item with title inference
         const formatBufferItem = (item, asList = true) => {
-            const title = getAutoInferredTitle(item.anchor);
+            const title = getAutoInferredTitle(item.anchor, item.url);
             if (!title) {
                 try {
                     const url = new URL(item.url);
@@ -1188,7 +1524,7 @@
      * JavaScript boolean: Primitive type with two values: true or false
      * MouseEvent coordinates: clientX/clientY are relative to viewport
      * getBoundingClientRect() used for position adjustment
-     * Parameter types:
+     * Parameter types:sour
      * - x: number (pixel coordinate from MouseEvent.clientX)
      * - y: number (pixel coordinate from MouseEvent.clientY)
      * - isAnchor: boolean (JavaScript primitive boolean type)
@@ -1236,8 +1572,9 @@
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-size: 11px;
-            min-width: 150px;
-            max-width: 250px;
+            min-width: 180px;
+            max-width: 480px;
+            width: max-content;
         `;
         log('Did create menu element');
 
@@ -1253,7 +1590,7 @@
             const linkText = getLinkText(anchor);
             if (linkText) {
                 log(`Did get link text, adding to options: "${linkText}"`);
-                options.push({ label: `Link Text: "${truncate(linkText, 25)}"`, getValue: () => linkText });
+                options.push({ label: `Link: ${linkText}`, getValue: () => linkText });
             } else {
                 log('No link text available');
             }
@@ -1264,7 +1601,14 @@
         const selectedText = getSelectedText();
         if (selectedText) {
             log(`Did get selected text, adding to options: "${selectedText}"`);
-            options.push({ label: `Selected Text: "${truncate(selectedText, 25)}"`, getValue: () => selectedText });
+            const selectionOptionValue = selectedText;
+            options.push({
+                label: `Selection: ${selectionOptionValue}`,
+                getValue: () => {
+                    clearSelectionCache('menu selection used');
+                    return selectionOptionValue;
+                }
+            });
         } else {
             log('No selected text available');
         }
@@ -1273,9 +1617,28 @@
         const pageTitle = getPageTitle();
         if (pageTitle) {
             log(`Did get page title, adding to options: "${pageTitle}"`);
-            options.push({ label: `Page Title: "${truncate(pageTitle, 25)}"`, getValue: () => pageTitle });
+            options.push({ label: `Page: ${pageTitle}`, getValue: () => pageTitle });
         } else {
             log('No page title available');
+        }
+
+        if (capturedUrl) {
+            log('Will build URL component title option');
+            const urlComponentTitle = getUrlComponentTitle(capturedUrl);
+            if (urlComponentTitle) {
+                log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
+                options.push({ label: `URL: ${urlComponentTitle}`, getValue: () => urlComponentTitle });
+            } else {
+                log('URL component title unavailable');
+            }
+
+            const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: 'reverse' });
+            if (urlComponentTitleLRU) {
+                log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
+                options.push({ label: `LRU: ${urlComponentTitleLRU}`, getValue: () => urlComponentTitleLRU });
+            } else {
+                log('Reverse URL component title unavailable');
+            }
         }
 
         if (!isAnchor) {
@@ -1283,7 +1646,7 @@
             const metaDesc = getMetaDescription();
             if (metaDesc) {
                 log(`Did get meta description, adding to options: "${metaDesc}"`);
-                options.push({ label: `Meta Description: "${truncate(metaDesc, 25)}"`, getValue: () => metaDesc });
+                options.push({ label: `Meta: ${metaDesc}`, getValue: () => metaDesc });
             } else {
                 log('No meta description available');
             }
@@ -1291,18 +1654,18 @@
 
         // Always add custom title option
         log('Adding custom title option');
-        options.push({ label: 'Custom Title...', getValue: promptCustomTitle });
+        options.push({ label: 'Custom', getValue: promptCustomTitle });
         
         // Add separator and "All Links" options at the bottom
         log('Adding extract all links options');
         options.push({ 
-            label: 'All Links (Flat)', 
+            label: 'all (flat)', 
             getValue: extractAllLinksFlat,
             isAllLinks: true,
             isSeparator: true  // Add visual separator above this item
         });
         options.push({ 
-            label: 'All Links (Hierarchical)', 
+            label: 'all (tree)', 
             getValue: extractAllLinksHierarchical,
             isAllLinks: true 
         });
@@ -1316,11 +1679,11 @@
             const item = document.createElement('div');
             item.textContent = option.label;
             item.style.cssText = `
-                padding: 4px 10px;
+                padding: 6px 12px;
                 cursor: pointer;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                white-space: normal;
+                line-height: 1.4;
+                word-break: break-word;
                 ${option.isSeparator ? 'border-top: 1px solid #ccc; margin-top: 4px; padding-top: 8px;' : ''}
             `;
 
@@ -1486,31 +1849,6 @@
         log('Did clear target variables');
         
         logFunctionEnd('removeMenu');
-    }
-
-    /**
-     * Truncates text to maximum length, appending '...' if needed
-     * Used to keep menu options readable with long titles
-     * @param {string} text - Text to truncate
-     * @param {number} maxLength - Maximum length before truncation
-     * @returns {string} Original or truncated text
-     * Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/substring
-     */
-    function truncate(text, maxLength) {
-        logFunctionBegin('truncate');
-        log(`Will truncate text (length ${text.length}) to max ${maxLength}`);
-        
-        let result;
-        if (text.length <= maxLength) {
-            result = text;
-            log('Text does not need truncation');
-        } else {
-            result = text.substring(0, maxLength) + '...';
-            log(`Did truncate text to: "${result}"`);
-        }
-        
-        logFunctionEnd('truncate');
-        return result;
     }
 
     // ============================================================================

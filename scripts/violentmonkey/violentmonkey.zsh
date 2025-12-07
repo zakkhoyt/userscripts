@@ -5,7 +5,7 @@
 #
 # ---- ---- ----  About this Script  ---- ---- ----
 #
-# TODO: zakkhoyt - about script
+# TODO: zakkhoyt AI - about script
 #
 # ---- ---- ----     Source Utilities     ---- ---- ----
 
@@ -43,18 +43,33 @@ fi
 
 
 # ---- ---- ----     Help Function     ---- ---- ----
-# TODO: zakkhoyt - 
 
 function print_usage {
   cat << 'EOF'
 SYNOPSIS
-    $SCRIPT_NAME [OPTIONS] [DEVELOPMENT OPTIONS]
+    violentmonkey.zsh --script <script_path> [OPTIONS] [DEVELOPMENT OPTIONS]
 
 DESCRIPTION
-    # TODO: zakkhoyt - print_usage description
+    Serves a ViolentMonkey/GreaseMonkey userscript via HTTP server for live 
+    development with automatic reload. The script starts an http-server instance,
+    opens the script URL in a browser, and monitors for file changes. This enables
+    rapid development workflow: edit the userscript in your editor, save, and 
+    ViolentMonkey automatically reloads the changes in the browser.
+
+    The script automatically detects all available network interfaces and allows
+    you to select which URL to use, or automatically selects based on a preferred IP.
 
 OPTIONS
-    # TODO: zakkhoyt - print_usage options
+    --script <path>
+        Path to the ViolentMonkey userscript file (*.user.js) to serve (required)
+
+    --ip <ip_address>
+        Preferred IP address to auto-select from available server URLs
+        (default: 127.0.0.1)
+        
+        If the preferred IP is found in the list of available URLs, it will be
+        automatically selected. Otherwise, you will be prompted to choose from
+        available options.
 
     --help
         Display this help message and exit
@@ -77,18 +92,51 @@ DEVELOPMENT OPTIONS
     --trap-exit, --debug-exit
         Enable EXIT trap handler (shows exit status information)
 
+WORKFLOW
+    1. Start the script with the path to your userscript
+    2. Browser opens to the script URL (e.g., http://127.0.0.1:8080/script.user.js)
+    3. In ViolentMonkey, enable "Track External Edits" for the script
+    4. Edit the userscript file in your editor and save
+    5. ViolentMonkey detects the change and automatically reloads
+    6. Refresh the target webpage to see your changes
+    7. Press Ctrl+C to stop the server when done
+
 EXAMPLES
-    # TODO: zakkhoyt - print_usage example
+EOF
+  echo_pretty "    # Serve a userscript using default settings (localhost)" --default
+  echo_pretty "    " --code "./violentmonkey.zsh --script markdown_linker/markdown_linker.user.js" --default
+  echo ""
+  echo_pretty "    # Serve with specific IP preference (useful for testing on mobile devices)" --default
+  echo_pretty "    " --code "./violentmonkey.zsh --script markdown_linker/markdown_linker.user.js --ip 192.168.1.100" --default
+  echo ""
+  echo_pretty "    # Serve with debug output enabled" --default
+  echo_pretty "    " --code "./violentmonkey.zsh --script markdown_linker/markdown_linker.user.js --debug" --default
+
+  cat << 'EOF'
 
 OUTPUT
-    # TODO: zakkhoyt - print_usage ouptut
+    The script outputs status messages to stderr and displays:
+    - Server startup information and available URLs
+    - Selected server URL
+    - Instructions for enabling "Track External Edits" in ViolentMonkey
+    - Server process ID for monitoring
+    - Instructions for stopping the server
+
+STDERR
+    Status messages, debug information (when --debug is enabled), and error messages
 
 EXIT STATUS
-    0   Success
-    >0   General failure
+    0   Success or clean shutdown (Ctrl+C)
+    1   Fatal error (script not found, http-server failed to start, etc.)
+
+REQUIREMENTS
+    - http-server (installed via homebrew if not present)
+    - ViolentMonkey or GreaseMonkey browser extension
+    - A userscript file (*.user.js)
 
 SEE ALSO
     $HOME/Documents/notes/javascript/VIOLENTMONKEY.md
+    scripts/violentmonkey/violentmonkey.md
 
 EOF
 }
@@ -164,9 +212,9 @@ slog_var_se_d "preferred_ip" "$preferred_ip"
 
 
 # script_path="$HOME/code/repositories/z2k/github/greasemonkey/markdown_linker/markdown_linker.user.js"
-script_dir=$(dirname "$script_path")
+script_dir="${script_path:h}"
 slog_var_se_d "script_dir" "$script_dir"
-script_base=$(basename "$script_path")
+script_base="${script_path:t}"
 slog_var_se_d "script_base" "$script_base"
 
 # Nav to same dir as your *.user.js script
@@ -201,7 +249,8 @@ slog_step_se --context success "Created temporary file: " --url "$temp_output" -
 trap "kill \${http_server_pid:-} 2>/dev/null; rm -f '$temp_output'" EXIT INT TERM
 
 # [step] Start http-server in background
-slog_step_se --context will "Start " --code "http-server" --default " in background from directory: " --url "$script_dir" --default
+script_dir_display="${script_dir#$PWD/}"
+slog_step_se --context will "Start " --code "http-server" --default " in background from directory: " --url "$script_dir_display" --default
 
 # Start http-server in background and capture initial output
 http-server -c5 > "$temp_output" 2>&1 &
@@ -221,7 +270,7 @@ $server_output"
   exit 1
 fi
 
-slog_step_se --context success "Verified " --code "http-server" --default " is running (PID: " --code "$http_server_pid" --default ") from directory: " --url "$script_dir" --default
+slog_step_se --context success "Verified " --code "http-server" --default " is running (PID: " --code "$http_server_pid" --default ") from directory: " --url "$script_dir_display" --default
 
 # [step] Parse server URL from output
 slog_step_se --context will "Parse server URLs from " --code "http-server" --default " output"
@@ -336,7 +385,7 @@ script_url="$server_base_url/$script_base"
 slog_var_se_d "script_url" "$script_url"
 
 # [step] Open script URL in browser
-slog_step_se --context will "Open script URL in browser: " --url "$script_url" --default
+slog_step_se --context will "Open script URLs in browser: " --url "$script_url" --default
 
 open "$script_url" || {
   exit_code=$?
@@ -347,9 +396,10 @@ open "$script_url" || {
 # TODO: zakkhoyt P1 - Open webpage (that the script affects), in a browser.
 
 # Display instructions
+script_path_display="${script_path#$PWD/}"
 slog_se ""
 slog --magenta "[violentmonkey]" --default " Click checkbox: " --bold "Track External Edits" --default
-slog --magenta "[violentmonkey]" --default " Edit " --url "$script_path" --default " using whatever you like" --default
+slog --magenta "[violentmonkey]" --default " Edit " --url "$script_path_display" --default " using whatever you like" --default
 slog_se ""
 slog --cyan "[info]" --default " http-server is running (PID: " --code "$http_server_pid" --default ")"
 slog --cyan "[info]" --default " Press " --bold "Ctrl+C" --default " to stop the server and exit"
