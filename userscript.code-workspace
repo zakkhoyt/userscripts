@@ -1,6 +1,10 @@
 {
   "folders": [
     {
+      "path": "/Users/zakkhoyt/.ai",
+      "name": ".ai"
+    },
+    {
       "path": ".",
       "name": "userscripts"
     }
@@ -122,7 +126,11 @@
       "jq": true,
       "sed": true,
       "tee": true,
-      "xargs": true
+      "xargs": true,
+      "/`. +`/s": {
+        "approve": true,
+        "matchCommandLine": true
+      }
     },
     "chat.tools.edits.autoApprove": {},
     "chat.tools.eligibleForAutoApproval": {}
