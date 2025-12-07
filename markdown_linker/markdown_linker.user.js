@@ -540,11 +540,12 @@
             return fallbackContext;
         }
 
+        const enrichedContext = enrichYouTubeContextWithFallback(context, url);
         youtubeContextCacheKey = intent.key;
-        youtubeContextCacheValue = context;
+        youtubeContextCacheValue = enrichedContext;
         log('Cached toolkit YouTube context');
         logFunctionEnd('getYouTubeContext');
-        return context;
+        return enrichedContext;
     }
 
     /**
@@ -894,6 +895,73 @@
         youtubeContextCacheValue = context;
         log('Cached fallback YouTube context');
         logFunctionEnd('buildYouTubeFallbackContext');
+        return context;
+    }
+
+    /**
+     * Heuristically determines whether a supposed YouTube title is actually a description blob
+     * @param {string|null} candidate - Title text to inspect
+     * @returns {boolean} True when text looks like a description paragraph
+     */
+    function isLikelyYouTubeDescription(candidate) {
+        if (!candidate) {
+            return false;
+        }
+        const normalized = candidate.trim();
+        if (!normalized) {
+            return false;
+        }
+        if (normalized.length >= 140) {
+            return true;
+        }
+        if (normalized.includes('\n')) {
+            return true;
+        }
+        if (/https?:\/\//i.test(normalized)) {
+            return true;
+        }
+        if (/subscribe|available\snow|check\s+out/i.test(normalized)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Enriches toolkit context values with DOM fallback data whenever titles look wrong
+     * @param {object|null} context - Toolkit context structure to sanitize
+     * @param {string} url - Target URL for fallback extraction
+     * @returns {object|null} Updated context (or original when already valid)
+     */
+    function enrichYouTubeContextWithFallback(context, url) {
+        if (!context) {
+            return context;
+        }
+        const needsVideoFallback = !context.video || isLikelyYouTubeDescription(context.video.title);
+        const needsChannelFallback = !context.channel || !context.channel.title;
+        if (!needsVideoFallback && !needsChannelFallback) {
+            return context;
+        }
+
+        const fallbackContext = buildYouTubeFallbackContext(url);
+        if (!fallbackContext) {
+            return context;
+        }
+
+        if (needsVideoFallback && fallbackContext.video) {
+            if (!context.video) {
+                context.video = fallbackContext.video;
+            } else {
+                context.video.title = fallbackContext.video.title || context.video.title;
+                context.video.channelName = context.video.channelName || fallbackContext.video.channelName;
+                context.video.shortUrl = context.video.shortUrl || fallbackContext.video.shortUrl;
+                context.video.canonicalUrl = context.video.canonicalUrl || fallbackContext.video.canonicalUrl;
+            }
+        }
+
+        if (needsChannelFallback && fallbackContext.channel) {
+            context.channel = context.channel || fallbackContext.channel;
+        }
+
         return context;
     }
 
@@ -2381,7 +2449,7 @@
             });
         }
 
-        if (!isAnchor) {
+        if (!isAnchor && !youtubeContext) {
             log('Not anchor, will get meta description');
             const metaDesc = getMetaDescription();
             if (metaDesc) {
