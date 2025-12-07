@@ -478,16 +478,18 @@
 
         const toolkit = getYouTubeToolkit();
         if (!toolkit) {
-            log('YouTube toolkit unavailable, skipping context build');
+            log('YouTube toolkit unavailable, attempting DOM fallback context');
+            const fallbackContext = buildYouTubeFallbackContext(url);
             logFunctionEnd('getYouTubeContext');
-            return null;
+            return fallbackContext;
         }
 
         const intent = buildYouTubeContextIntent(url, toolkit);
         if (!intent.key) {
-            log('No valid YouTube context key, aborting');
+            log('No valid YouTube context key, attempting fallback context');
+            const fallbackContext = buildYouTubeFallbackContext(url);
             logFunctionEnd('getYouTubeContext');
-            return null;
+            return fallbackContext;
         }
 
         if (youtubeContextCacheKey === intent.key && youtubeContextCacheValue) {
@@ -532,14 +534,15 @@
         }
 
         if (!context.video && !context.playlist && !context.channel) {
-            log('YouTube context extraction produced no data');
+            log('YouTube context extraction produced no data, attempting fallback context');
+            const fallbackContext = buildYouTubeFallbackContext(url);
             logFunctionEnd('getYouTubeContext');
-            return null;
+            return fallbackContext;
         }
 
         youtubeContextCacheKey = intent.key;
         youtubeContextCacheValue = context;
-        log('Cached YouTube context for future lookups');
+        log('Cached toolkit YouTube context');
         logFunctionEnd('getYouTubeContext');
         return context;
     }
@@ -688,6 +691,210 @@
         log(`Built ${options.length} timestamp menu options`);
         logFunctionEnd('buildYouTubeTimestampMenuOptions');
         return options;
+    }
+
+    /**
+     * Returns the first non-empty text value from a list of selector/attribute descriptors
+     * @param {Array<{selector: string, attribute?: string}>} descriptors - Query descriptors to evaluate in order
+     * @param {string} contextLabel - Human-readable label for logging (e.g., "YouTube title")
+     * @returns {string|null} Trimmed text value or null if none found
+     */
+    function getFirstMatchingText(descriptors, contextLabel) {
+        logFunctionBegin('getFirstMatchingText');
+        if (!Array.isArray(descriptors) || descriptors.length === 0) {
+            log('Descriptor list empty');
+            logFunctionEnd('getFirstMatchingText');
+            return null;
+        }
+
+        for (let index = 0; index < descriptors.length; index += 1) {
+            const descriptor = descriptors[index];
+            if (!descriptor || !descriptor.selector) {
+                continue;
+            }
+            const element = document.querySelector(descriptor.selector);
+            if (!element) {
+                continue;
+            }
+            const rawValue = descriptor.attribute ? element.getAttribute(descriptor.attribute) : element.textContent;
+            const trimmedValue = rawValue ? rawValue.trim() : '';
+            if (trimmedValue) {
+                log(`Matched ${contextLabel} selector: ${descriptor.selector}`);
+                logFunctionEnd('getFirstMatchingText');
+                return trimmedValue;
+            }
+        }
+
+        log(`No ${contextLabel} selector produced text`);
+        logFunctionEnd('getFirstMatchingText');
+        return null;
+    }
+
+    /**
+     * Removes the trailing " - YouTube" suffix from titles when present
+     * @param {string|null} title - Title candidate to clean
+     * @returns {string|null} Title without suffix or null when input empty
+     */
+    function stripYouTubeTitleSuffix(title) {
+        if (!title) {
+            return null;
+        }
+        const trimmed = title.trim();
+        if (!trimmed) {
+            return null;
+        }
+        const stripped = trimmed.replace(/\s+-\s+YouTube$/i, '').trim();
+        return stripped || trimmed;
+    }
+
+    /**
+     * Normalizes a YouTube video ID candidate by enforcing length/pattern rules
+     * @param {string|null} candidate - Candidate string potentially containing an ID
+     * @returns {string|null} Validated 11-character video ID or null when not found
+     */
+    function normalizeYouTubeVideoId(candidate) {
+        if (!candidate) {
+            return null;
+        }
+        const trimmed = candidate.trim();
+        if (!trimmed) {
+            return null;
+        }
+        if (/^[A-Za-z0-9_-]{11}$/.test(trimmed)) {
+            return trimmed;
+        }
+        const match = trimmed.match(/([A-Za-z0-9_-]{11})/);
+        return match ? match[1] : null;
+    }
+
+    /**
+     * Extracts a YouTube video ID from various supported URL formats
+     * @param {string|URL} urlToParse - URL string or URL object to inspect
+     * @returns {string|null} Extracted 11-character video ID or null on failure
+     */
+    function extractYouTubeVideoIdFromUrl(urlToParse) {
+        logFunctionBegin('extractYouTubeVideoIdFromUrl');
+        let urlObj;
+        try {
+            urlObj = typeof urlToParse === 'string' ? new URL(urlToParse, window.location.href) : urlToParse;
+        } catch (error) {
+            logWarn(`Failed to parse URL for video ID extraction: ${error.message}`);
+            logFunctionEnd('extractYouTubeVideoIdFromUrl');
+            return null;
+        }
+
+        const hostname = (urlObj.hostname || '').toLowerCase();
+        if (hostname === 'youtu.be') {
+            const shortCandidate = normalizeYouTubeVideoId(urlObj.pathname.replace(/^\/+/, '').split('/')[0]);
+            if (shortCandidate) {
+                log(`Extracted video ID from youtu.be pathname: ${shortCandidate}`);
+                logFunctionEnd('extractYouTubeVideoIdFromUrl');
+                return shortCandidate;
+            }
+        }
+
+        const paramCandidate = normalizeYouTubeVideoId(urlObj.searchParams.get('v'));
+        if (paramCandidate) {
+            log(`Extracted video ID from query parameter: ${paramCandidate}`);
+            logFunctionEnd('extractYouTubeVideoIdFromUrl');
+            return paramCandidate;
+        }
+
+        const pathMatch = urlObj.pathname.match(/\/(?:embed|shorts)\/([A-Za-z0-9_-]{11})/);
+        if (pathMatch) {
+            log(`Extracted video ID from path segment: ${pathMatch[1]}`);
+            logFunctionEnd('extractYouTubeVideoIdFromUrl');
+            return pathMatch[1];
+        }
+
+        log('No video ID found in URL');
+        logFunctionEnd('extractYouTubeVideoIdFromUrl');
+        return null;
+    }
+
+    /**
+     * Builds a minimal YouTube context by reading DOM metadata (used when toolkit is unavailable)
+     * @param {string} url - Target URL for which context is required
+     * @returns {object|null} Fallback context structure compatible with buildYouTubeMenuOptions
+     */
+    function buildYouTubeFallbackContext(url) {
+        logFunctionBegin('buildYouTubeFallbackContext');
+        let urlObj;
+        try {
+            urlObj = new URL(url, window.location.href);
+        } catch (error) {
+            logWarn(`Fallback context URL parse failed: ${error.message}`);
+            logFunctionEnd('buildYouTubeFallbackContext');
+            return null;
+        }
+
+        const hostname = (urlObj.hostname || '').toLowerCase();
+        if (!hostname.includes('youtube.com') && hostname !== 'youtu.be') {
+            log('Fallback context skipped: non-YouTube host');
+            logFunctionEnd('buildYouTubeFallbackContext');
+            return null;
+        }
+
+        const videoId = extractYouTubeVideoIdFromUrl(urlObj);
+        const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : urlObj.toString();
+        const shortUrl = videoId ? `https://youtu.be/${videoId}` : null;
+
+        const titleFromDom = getFirstMatchingText([
+            { selector: 'h1.ytd-watch-metadata' },
+            { selector: '#title h1' },
+            { selector: 'meta[property="og:title"]', attribute: 'content' },
+            { selector: 'meta[name="title"]', attribute: 'content' }
+        ], 'YouTube title');
+        let resolvedTitle = stripYouTubeTitleSuffix(titleFromDom);
+
+        if (!resolvedTitle && document && typeof document.title === 'string') {
+            resolvedTitle = stripYouTubeTitleSuffix(document.title);
+        }
+
+        const channelName = getFirstMatchingText([
+            { selector: '#owner-name a' },
+            { selector: 'ytd-channel-name a' },
+            { selector: '#channel-name a' },
+            { selector: 'meta[itemprop="author"]', attribute: 'content' }
+        ], 'YouTube channel');
+
+        if (!resolvedTitle) {
+            resolvedTitle = 'YouTube Video';
+        }
+
+        const context = {
+            video: {
+                title: resolvedTitle,
+                channelName: channelName || null,
+                shortUrl,
+                canonicalUrl
+            },
+            playlist: null,
+            playback: null,
+            channel: channelName ? { title: channelName, canonicalUrl: null } : null,
+            pageState: 'watch'
+        };
+
+        if (!context.video.title) {
+            log('Fallback context missing title, aborting');
+            logFunctionEnd('buildYouTubeFallbackContext');
+            return null;
+        }
+
+        const cacheKey = videoId ? `fallback-video:${videoId}` : `fallback-url:${canonicalUrl}`;
+        if (cacheKey && youtubeContextCacheKey === cacheKey && youtubeContextCacheValue) {
+            log('Using cached fallback YouTube context');
+            logFunctionEnd('buildYouTubeFallbackContext');
+            return youtubeContextCacheValue;
+        }
+
+        if (cacheKey) {
+            youtubeContextCacheKey = cacheKey;
+        }
+        youtubeContextCacheValue = context;
+        log('Cached fallback YouTube context');
+        logFunctionEnd('buildYouTubeFallbackContext');
+        return context;
     }
 
     /**
