@@ -50,7 +50,7 @@ Works in both **browser** (ViolentMonkey userscripts) and **Node.js** environmen
 ## Directory Structure
 
 ```
-amazon_toolkit/
+common/amazon_toolkit/
 ├── extractors/              # Data extraction from Amazon pages
 │   ├── product_extractor.js
 │   ├── store_extractor.js
@@ -85,26 +85,26 @@ userscript_common/          # Generic utilities (shared across all userscripts)
 // @description  Amazon userscript
 // @match        https://www.amazon.com/*
 // @grant        none
-// @require      file://path/to/amazon_toolkit/helpers/logging_helpers.js
-// @require      file://path/to/amazon_toolkit/helpers/dom_helpers.js
-// @require      file://path/to/amazon_toolkit/helpers/validation_helpers.js
-// @require      file://path/to/amazon_toolkit/extractors/shared_extractor.js
-// @require      file://path/to/amazon_toolkit/extractors/product_extractor.js
-// @require      file://path/to/amazon_toolkit/links/link_cleaner.js
-// @require      file://path/to/amazon_toolkit/markdown/markdown_generator.js
+// @require      file://path/to/common/amazon_toolkit/helpers/logging_helpers.js
+// @require      file://path/to/common/amazon_toolkit/helpers/dom_helpers.js
+// @require      file://path/to/common/amazon_toolkit/helpers/validation_helpers.js
+// @require      file://path/to/common/amazon_toolkit/extractors/shared_extractor.js
+// @require      file://path/to/common/amazon_toolkit/extractors/product_extractor.js
+// @require      file://path/to/common/amazon_toolkit/links/link_cleaner.js
+// @require      file://path/to/common/amazon_toolkit/markdown/markdown_generator.js
 // ==/UserScript==
 ```
 
 ### Node.js
 
 ```bash
-# Copy amazon_toolkit/ directory to your project
-cp -r amazon_toolkit/ /path/to/project/
+# Copy common/amazon_toolkit/ directory to your project
+cp -r common/amazon_toolkit/ /path/to/project/
 ```
 
 ```javascript
-const productExtractor = require('./amazon_toolkit/extractors/product_extractor');
-const markdownGenerator = require('./amazon_toolkit/markdown/markdown_generator');
+const productExtractor = require('./common/amazon_toolkit/extractors/product_extractor');
+const markdownGenerator = require('./common/amazon_toolkit/markdown/markdown_generator');
 
 // Use the modules
 const productData = productExtractor.extractProductData(htmlString, url);
@@ -195,7 +195,7 @@ console.log(storeLink);
 
 ```javascript
 const { JSDOM } = require('jsdom');
-const productExtractor = require('./amazon_toolkit/extractors/product_extractor');
+const productExtractor = require('./common/amazon_toolkit/extractors/product_extractor');
 
 const html = '<html>...</html>'; // Amazon HTML
 const dom = new JSDOM(html);

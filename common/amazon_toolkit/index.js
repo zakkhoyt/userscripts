@@ -18,14 +18,14 @@
  * 
  * @example
  * // Browser (ViolentMonkey userscript)
- * // @require file://path/to/amazon_toolkit/index.js
+ * // @require file://path/to/common/amazon_toolkit/index.js
  * 
  * const productData = AmazonToolkit.extractProductData(document, window.location.href);
  * const markdown = AmazonToolkit.generateProductLink(productData);
  * 
  * @example
  * // Node.js
- * const AmazonToolkit = require('./amazon_toolkit');
+ * const AmazonToolkit = require('./common/amazon_toolkit');
  * 
  * const productData = AmazonToolkit.extractProductData(htmlString, url);
  * const markdown = AmazonToolkit.generateProductLink(productData);
