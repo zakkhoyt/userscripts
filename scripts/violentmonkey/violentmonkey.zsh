@@ -420,10 +420,13 @@ if [[ -f "$script_path" ]]; then
     if [[ "$script_line" != *"#dev-open"* ]]; then
       continue
     fi
-    if [[ "$script_line" != "//"*"#dev-open"* ]]; then
+
+    script_line_trimmed="${script_line#"${script_line%%[![:space:]]*}"}"
+    if [[ "$script_line_trimmed" != "// #dev-open"* ]]; then
       continue
     fi
-    dev_target="${script_line#*#dev-open}"
+
+    dev_target="${script_line_trimmed#"// #dev-open"}"
     dev_target="${dev_target#"${dev_target%%[![:space:]]*}"}"
     dev_target="${dev_target%"${dev_target##*[![:space:]]}"}"
     if [[ -z "$dev_target" ]]; then

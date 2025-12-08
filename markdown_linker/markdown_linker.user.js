@@ -640,10 +640,8 @@
      */
     function buildYouTubeTimestampMenuOptions(context, baseTitle, fallbackUrl) {
         logFunctionBegin('buildYouTubeTimestampMenuOptions');
-        const toolkit = getYouTubeToolkit();
-        const timeHelpers = toolkit?.Helpers?.Time;
-        if (!context || !context.playback || !context.playback.isActive || !context.video || !timeHelpers) {
-            log('Timestamp prerequisites missing (context/playback/toolkit)');
+        if (!context || !context.playback || !context.playback.isActive || !context.video) {
+            log('Timestamp prerequisites missing (context/playback/video)');
             logFunctionEnd('buildYouTubeTimestampMenuOptions');
             return [];
         }
@@ -662,36 +660,27 @@
             return [];
         }
 
-        const timestampCompact = timeHelpers.secondsToTimestamp(seconds);
-        const safeBaseTitle = baseTitle || context.video.title || 'YouTube Video';
-        const variants = [
-            { label: 'YouTube Timestamp (short)', param: `${Math.floor(seconds)}` },
-            { label: 'YouTube Timestamp (seconds)', param: `${Math.floor(seconds)}s` }
-        ];
-
-        if (timestampCompact) {
-            variants.push({ label: 'YouTube Timestamp (m:s)', param: timestampCompact });
+        const timestampDisplay = formatSecondsAsTimestamp(seconds) || `${Math.floor(seconds)}s`;
+        const decoratedBaseTitle = baseTitle || context.video.title || 'YouTube Video';
+        const decoratedTitle = `${decoratedBaseTitle} @ ${timestampDisplay}`;
+        const timestampUrl = buildYouTubeTimestampUrl(shortBase, `${Math.floor(seconds)}`);
+        if (!timestampUrl) {
+            log('Failed to build timestamp URL');
+            logFunctionEnd('buildYouTubeTimestampMenuOptions');
+            return [];
         }
 
-        const options = variants.reduce((accumulator, variant) => {
-            const timestampUrl = buildYouTubeTimestampUrl(shortBase, variant.param);
-            if (!timestampUrl) {
-                return accumulator;
-            }
-            const decoratedTitle = `${safeBaseTitle} @ ${variant.param}`;
-            accumulator.push({
-                label: `${variant.label} → ${variant.param}`,
-                getResult: () => ({
-                    title: decoratedTitle,
-                    url: timestampUrl
-                })
-            });
-            return accumulator;
-        }, []);
+        const option = {
+            label: decoratedTitle,
+            getResult: () => ({
+                title: decoratedTitle,
+                url: timestampUrl
+            })
+        };
 
-        log(`Built ${options.length} timestamp menu options`);
+        log('Built 1 timestamp menu option');
         logFunctionEnd('buildYouTubeTimestampMenuOptions');
-        return options;
+        return [option];
     }
 
     /**
@@ -876,6 +865,14 @@
             pageState: 'watch'
         };
 
+        const videoElement = document.querySelector('video');
+        if (videoElement && typeof videoElement.currentTime === 'number' && Number.isFinite(videoElement.currentTime)) {
+            context.playback = {
+                isActive: true,
+                seconds: videoElement.currentTime
+            };
+        }
+
         if (!context.video.title) {
             log('Fallback context missing title, aborting');
             logFunctionEnd('buildYouTubeFallbackContext');
@@ -896,6 +893,27 @@
         log('Cached fallback YouTube context');
         logFunctionEnd('buildYouTubeFallbackContext');
         return context;
+    }
+
+    /**
+     * Formats seconds into m:ss or h:mm:ss timestamp strings
+     * @param {number} seconds - Total seconds elapsed in the video
+     * @returns {string|null} Formatted timestamp or null when input invalid
+     */
+    function formatSecondsAsTimestamp(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) {
+            return null;
+        }
+        const totalSeconds = Math.floor(seconds);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+        const paddedMinutes = String(minutes).padStart(2, '0');
+        const paddedSeconds = String(secs).padStart(2, '0');
+        if (hours > 0) {
+            return `${hours}:${paddedMinutes}:${paddedSeconds}`;
+        }
+        return `${paddedMinutes}:${paddedSeconds}`;
     }
 
     /**
@@ -2363,17 +2381,19 @@
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: white;
-            border: 1px solid #ccc;
-            border-radius: 3px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
-            padding: 2px 0;
+            background: rgba(32, 33, 36, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+            padding: 6px 0;
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-size: 11px;
-            min-width: 180px;
-            max-width: 480px;
+            min-width: 220px;
+            max-width: 520px;
             width: max-content;
+            color: #f8f9fa;
+            backdrop-filter: blur(18px);
         `;
         log('Did create menu element');
 
@@ -2487,16 +2507,19 @@
             const item = document.createElement('div');
             item.textContent = option.label;
             item.style.cssText = `
-                padding: 6px 12px;
+                padding: 8px 14px;
                 cursor: pointer;
                 white-space: normal;
-                line-height: 1.4;
+                line-height: 1.45;
                 word-break: break-word;
-                ${option.isSeparator ? 'border-top: 1px solid #ccc; margin-top: 4px; padding-top: 8px;' : ''}
+                color: inherit;
+                background-color: transparent;
+                transition: background-color 120ms ease;
+                ${option.isSeparator ? 'border-top: 1px solid rgba(255,255,255,0.08); margin-top: 6px; padding-top: 12px;' : ''}
             `;
 
             item.addEventListener('mouseenter', () => {
-                item.style.backgroundColor = '#f0f0f0';
+                item.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
             });
 
             item.addEventListener('mouseleave', () => {
