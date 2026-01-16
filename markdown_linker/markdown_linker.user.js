@@ -1550,7 +1550,14 @@
         log('Will get document.title');
         
         // Type: string (native browser API always returns string, never null/undefined)
-        const title = document.title.trim() || null;
+        let title = document.title.trim() || null;
+        if (title) {
+            const normalizedTitle = normalizeTitleForUrl(title, window.location.href);
+            if (normalizedTitle && normalizedTitle !== title) {
+                log(`Normalized page title for current URL: "${normalizedTitle}"`);
+            }
+            title = normalizedTitle || title;
+        }
         
         log(`Did get page title: ${title ? `"${title}"` : 'null'}`);
         logFunctionEnd('getPageTitle');
@@ -1584,6 +1591,66 @@
         log(`Did get meta description: ${description ? `"${description}"` : 'null'}`);
         logFunctionEnd('getMetaDescription');
         return description;
+    }
+
+    /**
+     * Determines whether the provided URL targets an Amazon product route (/dp/ or /gp/product/)
+     * @param {string|null} url - URL string to inspect
+     * @returns {boolean} True when URL appears to be an Amazon product page
+     */
+    function isAmazonProductUrl(url) {
+        logFunctionBegin('isAmazonProductUrl');
+        if (!url) {
+            log('URL missing for Amazon detection');
+            logFunctionEnd('isAmazonProductUrl');
+            return false;
+        }
+
+        try {
+            const parsedUrl = new URL(url, window.location.href);
+            const hostname = (parsedUrl.hostname || '').toLowerCase();
+            if (!hostname.includes('amazon.')) {
+                log('Hostname not Amazon, skipping detection');
+                logFunctionEnd('isAmazonProductUrl');
+                return false;
+            }
+
+            const path = parsedUrl.pathname || '';
+            const isProduct = /\/dp\/([A-Z0-9]{10})(?:[/?]|$)/.test(path) || /\/gp\/product\/([A-Z0-9]{10})(?:[/?]|$)/.test(path);
+            log(`Amazon product route detected: ${isProduct}`);
+            logFunctionEnd('isAmazonProductUrl');
+            return isProduct;
+        } catch (error) {
+            logWarn(`Failed to parse URL for Amazon detection: ${error.message}`);
+            logFunctionEnd('isAmazonProductUrl');
+            return false;
+        }
+    }
+
+    /**
+     * Normalizes titles based on URL-specific rules (currently strips "Amazon.com:" prefix)
+     * @param {string|null} title - Title value to normalize
+     * @param {string|null} url - URL used to determine normalization rules
+     * @returns {string|null} Normalized title or original value when unchanged
+     */
+    function normalizeTitleForUrl(title, url) {
+        logFunctionBegin('normalizeTitleForUrl');
+        if (!title || !url) {
+            log('Title or URL missing, skipping normalization');
+            logFunctionEnd('normalizeTitleForUrl');
+            return title;
+        }
+
+        if (isAmazonProductUrl(url)) {
+            const stripped = title.replace(/^Amazon\.com:\s*/i, '').trim();
+            if (stripped && stripped !== title) {
+                log(`Stripped Amazon.com prefix from title: "${stripped}"`);
+                logFunctionEnd('normalizeTitleForUrl');
+                return stripped;
+            }
+        }
+        logFunctionEnd('normalizeTitleForUrl');
+        return title;
     }
 
     // ============================================================================
