@@ -692,16 +692,22 @@ function isAmazonImageURL(value) {
     }
 }
 
-// Export all extraction functions
+const SharedExtractor = {
+    extractProductASIN,
+    extractProductTitle,
+    cleanProductTitle,
+    extractProductBrand,
+    extractProductDescription,
+    extractProductPrice,
+    extractProductImageURL,
+    extractProductVariant
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        extractProductASIN,
-        extractProductTitle,
-        cleanProductTitle,
-        extractProductBrand,
-        extractProductDescription,
-        extractProductPrice,
-        extractProductImageURL,
-        extractProductVariant
-    };
+    module.exports = SharedExtractor;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['extractors/shared_extractor'] = SharedExtractor;
 }

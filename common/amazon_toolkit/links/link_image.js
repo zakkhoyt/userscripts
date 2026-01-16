@@ -308,15 +308,21 @@ function getHighestResolution(imageUrl, maxSize = 1500) {
     return buildImageURL(imageId, { size: maxSize });
 }
 
-// Export all functions
+const LinkImage = {
+    extractImageID,
+    buildImageURL,
+    resizeImageURL,
+    generateImageVariants,
+    parseImageURL,
+    isAmazonImageURL,
+    getHighestResolution
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        extractImageID,
-        buildImageURL,
-        resizeImageURL,
-        generateImageVariants,
-        parseImageURL,
-        isAmazonImageURL,
-        getHighestResolution
-    };
+    module.exports = LinkImage;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['links/link_image'] = LinkImage;
 }

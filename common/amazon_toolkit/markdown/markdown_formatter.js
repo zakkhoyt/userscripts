@@ -341,16 +341,23 @@ function formatCompleteTitle(components) {
 }
 
 // Export all functions
+const MarkdownFormatter = {
+    escapeMarkdown,
+    formatTitle,
+    formatBrand,
+    formatVariant,
+    formatPrice,
+    normalizeWhitespace,
+    truncateText,
+    stripHTML,
+    formatCompleteTitle
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        escapeMarkdown,
-        formatTitle,
-        formatBrand,
-        formatVariant,
-        formatPrice,
-        normalizeWhitespace,
-        truncateText,
-        stripHTML,
-        formatCompleteTitle
-    };
+    module.exports = MarkdownFormatter;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['markdown/markdown_formatter'] = MarkdownFormatter;
 }

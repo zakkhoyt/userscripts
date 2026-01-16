@@ -555,20 +555,26 @@ function isAmazonImageURL(url) { /* Implementation in validation_helpers.js */ r
 function logWarn(...args) { /* Implementation in logging_helpers.js */ }
 function logError(...args) { /* Implementation in logging_helpers.js */ }
 
-// Export functions
+const ProductExtractor = {
+    extractProductData,
+    extractProductPriceData,
+    extractProductImageData,
+    extractProductImageID,
+    extractProductAvailability,
+    extractProductShipping,
+    extractProductRating,
+    parseProductPriceValue,
+    extractProductCurrency,
+    parseURLData,
+    isVariantParameter,
+    isTrackingParameter
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        extractProductData,
-        extractProductPriceData,
-        extractProductImageData,
-        extractProductImageID,
-        extractProductAvailability,
-        extractProductShipping,
-        extractProductRating,
-        parseProductPriceValue,
-        extractProductCurrency,
-        parseURLData,
-        isVariantParameter,
-        isTrackingParameter
-    };
+    module.exports = ProductExtractor;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['extractors/product_extractor'] = ProductExtractor;
 }

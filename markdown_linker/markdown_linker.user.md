@@ -6,10 +6,10 @@
 
 
 
-* [ ] for amazon products, change the opt+z+click behavior from `url reverse` to `url forward`
-  * [ ] url reverse gives unreadable results on this domain. EX: 
-    * [ ] url reverse: `[Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)`
-    * [ ] page title: [Amazon Grocery, Mexican-Style Four Cheese Blend, 8 Oz (Previously Happy Belly Packaging May Vary) : Grocery & Gourmet Food](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
+* [X] ~~*for amazon products, change the opt+z+click behavior from `url reverse` to `url forward`*~~ [2026-01-16]
+  * [X] ~~*url reverse gives unreadable results on this domain. EX:*~~ [2026-01-16] 
+    * [X] ~~*url reverse: `[Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)`*~~ [2026-01-16]
+    * [X] ~~*page title: [Amazon Grocery, Mexican-Style Four Cheese Blend, 8 Oz (Previously Happy Belly Packaging May Vary) : Grocery & Gourmet Food](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)*~~ [2026-01-16]
 * [X] It's still always using `URL (reverse)` despite what the preference is set to for amazon products
   * [X] As I cycle through that preference, one of the entires is printed as `28 Alt+Z title: URL (front) (click to cycle)`.
     * I'm not sure that this is supposed to correlate to? 
@@ -27,43 +27,98 @@
 
 
 
+* several of the amazon related functions in `markdown_linker/markdown_linker.user.js` should maybe reside instead in `amazon_toolkit`. 
+  * Also, there are many functions in amazon_toolkit that can improve `markdown_linker/markdown_linker.user.js`
+    * classify amazon.com urls as "product url", "store url"
+    * classify amazon product urls by url syntax: "dp", "asin", etc..
+  * This will allow improved behavior such as:
+      * EX: I want to do something like: If url is amazon.product then formt the title like this. Else if url is amazon.store then formt the title like this. url is amazon.search then formt the title like this...
+        * MOre to come on this later
+  * Promotes DRY
+  * Smaller userscript
+* ActionItems
+  * re-read AI instructions
+  * [X] Evaluate `common/amazon_toolkit/**`
+  * [X] Evaluate `markdown_linker/markdown_linker.user.js`
+  * [X] Compose a list of recommendations on feasability, and how to go about doing so in steps with tests along the way
+    * [X] Write this up to `markdown_linker/docs/INTEGRATE_AMAZON_TOOLKIT.md`
+  * [X] Report back to me and we will discuss before implementing
+
+
+
+
+
+
+
+* It seems to work, however I noticed a few things. The attached image is a screenshot of the popup menu
+  * [ ] The `Page Title` entry contains `Amazon.com: ` which it should not
+  * [ ] Both `URL (forward)` and `URL (reverse)` contain the word `Click`
+    * This seems to be because I'm opt+clicking on product links from an amazon search result. The script is doing what it should. 
+      * [Sspa - Click](https://www.amazon.com/sspa/click?ie=UTF8&spc=MTo4NDMxMzE2NzI3OTkzNTQ0OjE3Njg1NTE4OTQ6c3BfYXRmOjMwMDMzNzY5MTk2NzYwMjo6MDo6&url=%2FORGANIC-VALLEY%25C2%25AE-Cheddar-Shredded-Favorites%2Fdp%2FB0CTPML3NM%2Fref%3Dsr_1_1_us_f3_0o_wf_sspa%3Fcrid%3D3IQZAAPYR2W7D%26dib%3DeyJ2IjoiMSJ9.RmKs221QSC8FWBU71iLzAQWkHZf2724fwJhddD_DrHNTGQdQ5nyUrzseLWNp5cmfCu4Z3JcRY8D2rmAfjy-RcVndDdN3VrK16s5WPrpiHCsjF7UnI4oK32K6eQIMonSihYHYM0JKrKgL41vlKCEB-v9YceJoKMvjnVxfxElJolimq2ZCmaEgquJjYCxA8cpj6q-GjQ-oo_1IFUymuTgdf59wu5pj2n9v7A6NMj1bzy3407PFcAGMSRxhUkzvGO53NmYoZLKITWcNp8wCPw_E_M_BVEw4NMvv_q2Mv_PJVW4.y3OsBcpt4uKcmMw_P2QB1iIR79WE4DNzgRRETWafwQQ%26dib_tag%3Dse%26keywords%3Dcheese%26qid%3D1768551894%26sprefix%3Dchee%252Caps%252C242%26sr%3D8-1-spons%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9hdGY%26psc%3D1)
+    * more on this after the amazon_toolkit refactor is complete. 
+  * On another test click (opt+click on a product pages background) 
+    * Issue with `title`: product the `URL (forward)` contains some URL encoded text EX: `%c2`.  
+      * Expected title: [Organic Valley® Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
+      * Actual title: [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
+    * Issue with the `url`: this is not a cleand up / short amazon product link
+      * 
+      
+
+
+
+
 
 <!-- * [ ] For `amazon product` and `amazon shop/store` urls, let's delete some additional phrases and regexes from the composed title -->
-* [ ] For `amazon.com` urls, we convert it into a title and a url. 
-  * Before this title and url are used to compose the markdown link, I want to do some additional find/replace when the original URL's domain is `amazon.com`
-    * 
-  * [ ] Do this no matter which menu entry was clicked on, no matter how the script was invoked.
-
-*  [Amazon Grocery, Mexican-Style Four Cheese Blend, 8 Oz (Previously Happy Belly Packaging May Vary) : Grocery & Gourmet Food](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
-
-
-* [ ] several of the amazon related functions in `markdown_linker/markdown_linker.user.js` should maybe reside instead in `amazon_toolkit`. 
-  * [ ] Also, there are many functions in amazon_toolkit that can improve `markdown_linker/markdown_linker.user.js`
-    * [ ] classify amazon.com urls as "product url", "store url"
-    * [ ] classify amazon product urls as "dp", "asin", etc..
-  * Prompted DRY
-  * Smaller userscript
-
-
-[B075 Y8 Zv89](https://www.amazon.com/dp/B075Y8ZV89)
-
-
-
-[Amazon: Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)
-[Amazon: Dp - B075 Y8 Zv89](https://www.amazon.com/dp/B075Y8ZV89)
-
-current: [Amazon: Mexican Style Previously Happy Belly Packaging - Dp](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B08J4QQJ3K?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-1)
-
-
-
-[Amazon Grocery, Mexican-Style Four Cheese Blend, Finely Shredded, 16 Oz (Previously Happy Belly Packaging May Vary)](https://www.amazon.com/dp/B08J4QQJ3K)
-
-[Amazon.com : cheese](https://www.amazon.com/dp/B08J4QQJ3K)
-
-[Amazon: Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)
+* Now that we have access to the amazon_toolkit, we can categorize amazon links and maybe we can translate to other kinds of links types too. 
+  * EX: If I go to amazon.com then type  somethign in the search bar, it will show me a list of products. 
+    * when I click on these, amazon_toolkit should be able to tell us if the link is a product link, a store link, etc...
+      * but as I mentioned above this document, sometimes these search result have intermediate links.
+        * EX: Searchign for "cheese" returned this as one of the products. 
+        * https://www.amazon.com/sspa/click?ie=UTF8&spc=MTo4NDMxMzE2NzI3OTkzNTQ0OjE3Njg1NTE4OTQ6c3BfYXRmOjMwMDMzNzY5MTk2NzYwMjo6MDo6&url=%2FORGANIC-VALLEY%25C2%25AE-Cheddar-Shredded-Favorites%2Fdp%2FB0CTPML3NM%2Fref%3Dsr_1_1_us_f3_0o_wf_sspa%3Fcrid%3D3IQZAAPYR2W7D%26dib%3DeyJ2IjoiMSJ9.RmKs221QSC8FWBU71iLzAQWkHZf2724fwJhddD_DrHNTGQdQ5nyUrzseLWNp5cmfCu4Z3JcRY8D2rmAfjy-RcVndDdN3VrK16s5WPrpiHCsjF7UnI4oK32K6eQIMonSihYHYM0JKrKgL41vlKCEB-v9YceJoKMvjnVxfxElJolimq2ZCmaEgquJjYCxA8cpj6q-GjQ-oo_1IFUymuTgdf59wu5pj2n9v7A6NMj1bzy3407PFcAGMSRxhUkzvGO53NmYoZLKITWcNp8wCPw_E_M_BVEw4NMvv_q2Mv_PJVW4.y3OsBcpt4uKcmMw_P2QB1iIR79WE4DNzgRRETWafwQQ%26dib_tag%3Dse%26keywords%3Dcheese%26qid%3D1768551894%26sprefix%3Dchee%252Caps%252C242%26sr%3D8-1-spons%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9hdGY%26psc%3D1
+        * This is not directly what I would consider to be a product link, but it does contain the information needed to create one (the `url` query param contains  `dp` / and `asin` as well as the url description of the product)
+        * if I click on that link it takes me here: https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1
+* [ ] Update the script to classify an amazon link. 
+* [ ] When the script receives a `amazon.com` based link, and that link is classified as a `product` then I want to do some more refining
+  * Do this no matter which menu entry was clicked on, no matter how the script was invoked.
+  * Compute the markdown link title and url like normal, but before those are composed into a markdown link, lets do some further conditioning:
+      * In the title I want to remove these text blurbs. NOTE: I believe that the script or amazon_toolkit might already have code to handle some of these, thoguh I'm not sure it's doing so how/when I described above. Also nto sure it's covering all of these cases yet
+        * ` at Amazon Women’s Clothing store`
+        * ` at Amazon Men’s Clothing store`
+        * ` : Clothing, Shoes & Jewelry`
+        * `: Clothing, Shoes & Jewelry`
+        * `Amazon Grocery, `
+        * ` - Dp`
+      * I think these can all be addressed with these two regex (`sed -E` like pseudcode)
+        * regex: `s/(*.)( ?at Amazon.*)/$1/g`
+        * regex: `s/(*.)( ?: Clothing, Shoes & Jewelry)/$1/g`
+        * regex: `s/(Amazon Grocery, )(.*)/$1/g`
+        * regex: `s/(*.)( - Dp)/$1/g`
+        * replace them with `""`
 
 
-[Amazon: Mexican Style Previously Happy Belly Packaging - Dp](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B08J4QQJ3K?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-1)
+
+
+
+* [ ] When using opt+z+click, when the popup shows "Copied N links to clipboard", I'd like it to add a second line of text there which indicates which preference mode was used. 
+
+* [ ] amazon products - [storename - product descriptoin](short product url)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

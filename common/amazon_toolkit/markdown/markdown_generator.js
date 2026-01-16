@@ -338,14 +338,20 @@ function buildAmazonURL(components, format = 'short') {
     return url;
 }
 
-// Export all functions
+const MarkdownGenerator = {
+    generateProductLink,
+    generateProductImage,
+    generateProductImageLink,
+    generateProductCombined,
+    generateStoreLink,
+    generateAnchorLink
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        generateProductLink,
-        generateProductImage,
-        generateProductImageLink,
-        generateProductCombined,
-        generateStoreLink,
-        generateAnchorLink
-    };
+    module.exports = MarkdownGenerator;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['markdown/markdown_generator'] = MarkdownGenerator;
 }

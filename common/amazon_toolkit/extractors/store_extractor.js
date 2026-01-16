@@ -539,20 +539,26 @@ function getMetaByName(name, doc) { /* Implementation in dom_helpers.js */ retur
 function logWarn(...args) { /* Implementation in logging_helpers.js */ }
 function logError(...args) { /* Implementation in logging_helpers.js */ }
 
-// Export functions
+const StoreExtractor = {
+    extractStoreData,
+    isStorePage,
+    extractStoreName,
+    cleanStoreName,
+    extractStoreBrandName,
+    extractStoreDescription,
+    extractStoreLogo,
+    extractSellerId,
+    extractStoreId,
+    parseStoreURLData,
+    isTrackingParameter,
+    extractStoreImageID
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        extractStoreData,
-        isStorePage,
-        extractStoreName,
-        cleanStoreName,
-        extractStoreBrandName,
-        extractStoreDescription,
-        extractStoreLogo,
-        extractSellerId,
-        extractStoreId,
-        parseStoreURLData,
-        isTrackingParameter,
-        extractStoreImageID
-    };
+    module.exports = StoreExtractor;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['extractors/store_extractor'] = StoreExtractor;
 }

@@ -34,18 +34,144 @@
 'use strict';
 
 // ============================================================================
-// Module Imports
+// Module Loader Helpers
 // ============================================================================
 
-// NOTE: In a browser/userscript environment, these modules would be loaded
-// via @require directives or concatenated into a single file.
-// In Node.js, use proper require() statements.
+function loadModule(registryKey, requirePath) {
+    if (typeof require === 'function') {
+        try {
+            return require(requirePath);
+        } catch (error) {
+            // Fall through to global lookup
+        }
+    }
 
-// For standalone use, these are placeholder imports.
-// In production, replace with actual imports:
-// const DOMHelpers = require('./helpers/dom_helpers.js');
-// const LoggingHelpers = require('./helpers/logging_helpers.js');
-// etc.
+    if (typeof window !== 'undefined' && window.__AmazonToolkitModules) {
+        return window.__AmazonToolkitModules[registryKey] || {};
+    }
+
+    return {};
+}
+
+const domHelpers = loadModule('helpers/dom_helpers', './helpers/dom_helpers.js');
+const loggingHelpers = loadModule('helpers/logging_helpers', './helpers/logging_helpers.js');
+const validationHelpers = loadModule('helpers/validation_helpers', './helpers/validation_helpers.js');
+const sharedExtractor = loadModule('extractors/shared_extractor', './extractors/shared_extractor.js');
+const productExtractor = loadModule('extractors/product_extractor', './extractors/product_extractor.js');
+const storeExtractor = loadModule('extractors/store_extractor', './extractors/store_extractor.js');
+const linkParser = loadModule('links/link_parser', './links/link_parser.js');
+const linkCleaner = loadModule('links/link_cleaner', './links/link_cleaner.js');
+const linkImage = loadModule('links/link_image', './links/link_image.js');
+const markdownFormatter = loadModule('markdown/markdown_formatter', './markdown/markdown_formatter.js');
+const markdownGenerator = loadModule('markdown/markdown_generator', './markdown/markdown_generator.js');
+
+const noop = () => {};
+
+function ensureFunctions(target, names) {
+    names.forEach((name) => {
+        if (typeof target[name] !== 'function') {
+            target[name] = noop;
+        }
+    });
+    return target;
+}
+
+const helperFunctions = ensureFunctions(
+    Object.assign({}, domHelpers, loggingHelpers, validationHelpers),
+    [
+        'safeQuery',
+        'safeQueryAll',
+        'safeText',
+        'safeAttr',
+        'parseJsonLD',
+        'getMetaByProperty',
+        'getMetaByName',
+        'setDebugMode',
+        'log',
+        'logInfo',
+        'logWarn',
+        'logError',
+        'logFunctionBegin',
+        'logFunctionEnd',
+        'isValidASIN',
+        'isValidURL',
+        'isAmazonURL',
+        'isAmazonProductURL',
+        'isAmazonStoreURL',
+        'isAmazonImageURL'
+    ]
+);
+
+const extractorFunctions = ensureFunctions(
+    Object.assign({}, sharedExtractor, productExtractor, storeExtractor),
+    [
+        'extractProductASIN',
+        'extractProductTitle',
+        'extractProductBrand',
+        'extractProductDescription',
+        'extractProductPrice',
+        'extractProductImageURL',
+        'extractProductVariant',
+        'cleanProductTitle',
+        'extractProductData',
+        'extractProductPriceData',
+        'extractProductImageData',
+        'extractProductImageID',
+        'extractProductAvailability',
+        'extractProductShipping',
+        'extractProductRating',
+        'parseProductPriceValue',
+        'extractProductCurrency',
+        'extractStoreData',
+        'isStorePage',
+        'extractStoreName',
+        'cleanStoreName',
+        'extractStoreBrandName',
+        'extractStoreDescription',
+        'extractStoreLogo',
+        'extractSellerId',
+        'extractStoreId',
+        'parseStoreURLData',
+        'extractStoreImageID'
+    ]
+);
+
+const linkFunctions = ensureFunctions(
+    Object.assign({}, linkParser, linkCleaner, linkImage),
+    [
+        'parseAmazonURL',
+        'parseAmazonAnchor',
+        'determineURLType',
+        'extractAmazonAnchorsFromDOM',
+        'cleanAmazonURL',
+        'buildAmazonURL',
+        'cleanProductTitle',
+        'shortenTitle',
+        'extractImageID',
+        'buildImageURL',
+        'resizeImageURL',
+        'generateImageVariants',
+        'parseImageURL'
+    ]
+);
+
+const markdownFunctions = ensureFunctions(
+    Object.assign({}, markdownFormatter, markdownGenerator),
+    [
+        'escapeMarkdown',
+        'formatTitle',
+        'formatBrand',
+        'formatVariant',
+        'formatPrice',
+        'formatCompleteTitle',
+        'generateProductLink',
+        'generateProductImage',
+        'generateProductImageLink',
+        'generateProductCombined',
+        'generateStoreLink',
+        'generateAnchorLink'
+    ]
+);
 
 // ============================================================================
 // Main Exports
@@ -58,121 +184,22 @@ const AmazonToolkit = {
     // ========================================================================
     // Helpers Namespace
     // ========================================================================
-    Helpers: {
-        // DOM utilities
-        safeQuery: () => {},
-        safeQueryAll: () => {},
-        safeText: () => {},
-        safeAttr: () => {},
-        parseJsonLD: () => {},
-        getMetaByProperty: () => {},
-        getMetaByName: () => {},
-
-        // Logging utilities
-        setDebugMode: () => {},
-        log: () => {},
-        logInfo: () => {},
-        logWarn: () => {},
-        logError: () => {},
-        logFunctionBegin: () => {},
-        logFunctionEnd: () => {},
-
-        // Validation utilities
-        isValidASIN: () => {},
-        isValidURL: () => {},
-        isAmazonURL: () => {},
-        isAmazonProductURL: () => {},
-        isAmazonStoreURL: () => {},
-        isAmazonImageURL: () => {},
-    },
+    Helpers: helperFunctions,
 
     // ========================================================================
     // Extractors Namespace
     // ========================================================================
-    Extractors: {
-        // Shared extraction functions (Product-focused)
-        extractProductASIN: () => {},
-        extractProductTitle: () => {},
-        extractProductBrand: () => {},
-        extractProductDescription: () => {},
-        extractProductPrice: () => {},
-        extractProductImageURL: () => {},
-        extractProductVariant: () => {},
-        cleanProductTitle: () => {},
-
-        // Product extraction (main function)
-        extractProductData: () => {},
-        
-        // Product extraction (detailed helpers)
-        extractProductPriceData: () => {},
-        extractProductImageData: () => {},
-        extractProductImageID: () => {},
-        extractProductAvailability: () => {},
-        extractProductShipping: () => {},
-        extractProductRating: () => {},
-        parseProductPriceValue: () => {},
-        extractProductCurrency: () => {},
-
-        // Store extraction (main function)
-        extractStoreData: () => {},
-        isStorePage: () => {},
-        
-        // Store extraction (detailed helpers)
-        extractStoreName: () => {},
-        cleanStoreName: () => {},
-        extractStoreBrandName: () => {},
-        extractStoreDescription: () => {},
-        extractStoreLogo: () => {},
-        extractSellerId: () => {},
-        extractStoreId: () => {},
-        parseStoreURLData: () => {},
-        extractStoreImageID: () => {},
-    },
+    Extractors: extractorFunctions,
 
     // ========================================================================
     // Links Namespace
     // ========================================================================
-    Links: {
-        // Parser
-        parseAmazonURL: () => {},
-        parseAmazonAnchor: () => {},
-        determineURLType: () => {},
-        extractAmazonAnchorsFromDOM: () => {},
-
-        // Cleaner
-        cleanAmazonURL: () => {},
-        buildAmazonURL: () => {},
-        cleanProductTitle: () => {},
-        shortenTitle: () => {},
-
-        // Image
-        extractImageID: () => {},
-        buildImageURL: () => {},
-        resizeImageURL: () => {},
-        generateImageVariants: () => {},
-        parseImageURL: () => {},
-    },
+    Links: linkFunctions,
 
     // ========================================================================
     // Markdown Namespace
     // ========================================================================
-    Markdown: {
-        // Formatter
-        escapeMarkdown: () => {},
-        formatTitle: () => {},
-        formatBrand: () => {},
-        formatVariant: () => {},
-        formatPrice: () => {},
-        formatCompleteTitle: () => {},
-
-        // Generator
-        generateProductLink: () => {},
-        generateProductImage: () => {},
-        generateProductImageLink: () => {},
-        generateProductCombined: () => {},
-        generateStoreLink: () => {},
-        generateAnchorLink: () => {},
-    },
+    Markdown: markdownFunctions,
 
     // ========================================================================
     // Convenience Methods (Top-level access to most common functions)
@@ -185,7 +212,8 @@ const AmazonToolkit = {
      * @returns {Object|null} Product data
      */
     extractProductData: function(source, url) {
-        return this.Extractors.extractProductData(source, url);
+        const fn = this.Extractors.extractProductData;
+        return typeof fn === 'function' ? fn(source, url) : null;
     },
 
     /**
@@ -195,7 +223,8 @@ const AmazonToolkit = {
      * @returns {Object|null} Store data
      */
     extractStoreData: function(source, url) {
-        return this.Extractors.extractStoreData(source, url);
+        const fn = this.Extractors.extractStoreData;
+        return typeof fn === 'function' ? fn(source, url) : null;
     },
 
     /**
@@ -204,7 +233,8 @@ const AmazonToolkit = {
      * @returns {Object|null} Parsed URL data
      */
     parseURL: function(urlString) {
-        return this.Links.parseAmazonURL(urlString);
+        const fn = this.Links.parseAmazonURL;
+        return typeof fn === 'function' ? fn(urlString) : null;
     },
 
     /**
@@ -213,7 +243,8 @@ const AmazonToolkit = {
      * @returns {Object|null} Parsed anchor data
      */
     parseAnchor: function(anchor) {
-        return this.Links.parseAmazonAnchor(anchor);
+        const fn = this.Links.parseAmazonAnchor;
+        return typeof fn === 'function' ? fn(anchor) : null;
     },
 
     /**
@@ -223,7 +254,8 @@ const AmazonToolkit = {
      * @returns {string} Markdown link
      */
     generateProductLink: function(productData, options) {
-        return this.Markdown.generateProductLink(productData, options);
+        const fn = this.Markdown.generateProductLink;
+        return typeof fn === 'function' ? fn(productData, options) : '';
     },
 
     /**
@@ -233,7 +265,8 @@ const AmazonToolkit = {
      * @returns {string} Markdown link
      */
     generateStoreLink: function(storeData, options) {
-        return this.Markdown.generateStoreLink(storeData, options);
+        const fn = this.Markdown.generateStoreLink;
+        return typeof fn === 'function' ? fn(storeData, options) : '';
     },
 
     /**
@@ -243,7 +276,8 @@ const AmazonToolkit = {
      * @returns {string|null} Cleaned URL
      */
     cleanURL: function(urlString, options) {
-        return this.Links.cleanAmazonURL(urlString, options);
+        const fn = this.Links.cleanAmazonURL;
+        return typeof fn === 'function' ? fn(urlString, options) : urlString;
     },
 
     /**
@@ -253,7 +287,8 @@ const AmazonToolkit = {
      * @returns {string|null} Image URL
      */
     buildImageURL: function(imageId, options) {
-        return this.Links.buildImageURL(imageId, options);
+        const fn = this.Links.buildImageURL;
+        return typeof fn === 'function' ? fn(imageId, options) : null;
     },
 
     /**
@@ -262,7 +297,10 @@ const AmazonToolkit = {
      * @returns {void}
      */
     setDebugMode: function(enabled) {
-        this.Helpers.setDebugMode(enabled);
+        const fn = this.Helpers.setDebugMode;
+        if (typeof fn === 'function') {
+            fn(enabled);
+        }
     }
 };
 

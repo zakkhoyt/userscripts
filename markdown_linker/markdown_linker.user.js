@@ -1063,6 +1063,110 @@
         return options;
     }
 
+    // ============================================================================
+    // AMAZON TOOLKIT INTEGRATION
+    // ============================================================================
+
+    /**
+     * Safely returns the Amazon toolkit namespace when available
+     * @returns {object|null} Toolkit namespace loaded via @require directives
+     */
+    function getAmazonToolkit() {
+        logFunctionBegin('getAmazonToolkit');
+        if (typeof window === 'undefined') {
+            log('Window unavailable, cannot access Amazon toolkit');
+            logFunctionEnd('getAmazonToolkit');
+            return null;
+        }
+        const toolkit = window.AmazonToolkit || null;
+        log(`Amazon toolkit ${toolkit ? 'available' : 'unavailable'}`);
+        logFunctionEnd('getAmazonToolkit');
+        return toolkit;
+    }
+
+    /**
+     * Attempts to parse an Amazon anchor element via toolkit helpers
+     * @param {HTMLAnchorElement|null} anchor - Anchor element to inspect
+     * @returns {string|null} Clean or original URL provided by the toolkit
+     */
+    function getAmazonUrlFromAnchor(anchor) {
+        logFunctionBegin('getAmazonUrlFromAnchor');
+        if (!anchor) {
+            log('No anchor provided for Amazon parsing');
+            logFunctionEnd('getAmazonUrlFromAnchor');
+            return null;
+        }
+
+        const toolkit = getAmazonToolkit();
+        const linkNamespace = toolkit?.Links;
+        if (!linkNamespace || typeof linkNamespace.parseAmazonAnchor !== 'function') {
+            log('Amazon toolkit parseAmazonAnchor unavailable');
+            logFunctionEnd('getAmazonUrlFromAnchor');
+            return null;
+        }
+
+        try {
+            const parsedAnchor = linkNamespace.parseAmazonAnchor(anchor);
+            if (parsedAnchor?.url?.clean) {
+                log(`Toolkit returned clean Amazon URL: "${parsedAnchor.url.clean}"`);
+                logFunctionEnd('getAmazonUrlFromAnchor');
+                return parsedAnchor.url.clean;
+            }
+            if (parsedAnchor?.url?.original) {
+                log(`Toolkit returned original Amazon URL: "${parsedAnchor.url.original}"`);
+                logFunctionEnd('getAmazonUrlFromAnchor');
+                return parsedAnchor.url.original;
+            }
+            if (parsedAnchor?.href) {
+                log(`Toolkit returned href fallback: "${parsedAnchor.href}"`);
+                logFunctionEnd('getAmazonUrlFromAnchor');
+                return parsedAnchor.href;
+            }
+            log('Toolkit parseAmazonAnchor returned no usable URL');
+        } catch (error) {
+            logWarn(`Amazon toolkit anchor parsing failed: ${error.message}`);
+        }
+
+        logFunctionEnd('getAmazonUrlFromAnchor');
+        return null;
+    }
+
+    /**
+     * Builds an Amazon product URL for the given ASIN using toolkit helpers when possible
+     * @param {string|null} asin - Amazon ASIN identifier
+     * @returns {string|null} Constructed Amazon product URL
+     */
+    function buildAmazonUrlFromAsin(asin) {
+        logFunctionBegin('buildAmazonUrlFromAsin');
+        if (!asin) {
+            log('ASIN missing for Amazon URL construction');
+            logFunctionEnd('buildAmazonUrlFromAsin');
+            return null;
+        }
+
+        const toolkit = getAmazonToolkit();
+        const linkNamespace = toolkit?.Links;
+
+        if (linkNamespace && typeof linkNamespace.buildAmazonURL === 'function') {
+            const builtUrl = linkNamespace.buildAmazonURL({
+                asin,
+                hostname: window.location.hostname,
+                protocol: window.location.protocol || 'https:'
+            }, 'short');
+            if (builtUrl) {
+                log(`Toolkit built Amazon URL: "${builtUrl}"`);
+                logFunctionEnd('buildAmazonUrlFromAsin');
+                return builtUrl;
+            }
+            log('Toolkit buildAmazonURL returned null, will fall back to manual construction');
+        }
+
+        const fallbackUrl = `https://${window.location.hostname}/dp/${asin}`;
+        log(`Fallback Amazon URL constructed: "${fallbackUrl}"`);
+        logFunctionEnd('buildAmazonUrlFromAsin');
+        return fallbackUrl;
+    }
+
     /**
      * Returns a domain-specific title for supported providers (currently YouTube)
      * @param {string|null} url - Target URL for which the title is being composed
@@ -1214,86 +1318,95 @@
     function cleanUrl(url) {
         logFunctionBegin('cleanUrl');
         log(`Original URL: "${url}"`);
-        
-        try {
-            const urlObj = new URL(url);
-            
-            // Amazon-specific cleaning
-            if (urlObj.hostname.includes('amazon.')) {
-                log('Detected Amazon URL, will extract clean product URL');
-                
-                // Try to extract ASIN from path (format: /dp/{ASIN} or /gp/product/{ASIN})
-                const dpMatch = urlObj.pathname.match(/\/dp\/([A-Z0-9]{10})/);
-                const gpMatch = urlObj.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/);
-                
-                if (dpMatch) {
-                    const asin = dpMatch[1];
-                    const cleanAmazonUrl = `${urlObj.protocol}//${urlObj.hostname}/dp/${asin}`;
-                    log(`Extracted clean Amazon URL: "${cleanAmazonUrl}"`);
-                    logFunctionEnd('cleanUrl');
-                    return cleanAmazonUrl;
-                } else if (gpMatch) {
-                    const asin = gpMatch[1];
-                    const cleanAmazonUrl = `${urlObj.protocol}//${urlObj.hostname}/dp/${asin}`;
-                    log(`Extracted clean Amazon URL from /gp/product: "${cleanAmazonUrl}"`);
-                    logFunctionEnd('cleanUrl');
-                    return cleanAmazonUrl;
-                }
-                
-                log('Could not extract ASIN, will fall through to general cleaning');
-            }
-            
-            // General tracking parameter removal
-            log('Removing common tracking parameters');
-            const trackingParams = [
-                // Google Analytics
-                'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-                // Facebook
-                'fbclid',
-                // Google Ads
-                'gclid', 'gclsrc',
-                // Amazon tracking
-                'ref', 'ref_', 'pf_rd_r', 'pf_rd_p', 'pf_rd_m', 'pf_rd_s', 'pf_rd_t', 'pf_rd_i',
-                'pd_rd_r', 'pd_rd_w', 'pd_rd_wg',
-                'qid', 'sr', 'keywords', 'crid', 'sprefix', 'th', 'psc',
-                'dib', 'dib_tag',
-                // Marketing campaign
-                'mc_cid', 'mc_eid',
-                // General analytics
-                '_ga', '_gl',
-                // Other common tracking
-                'msclkid', 'twclid'
-            ];
-            
-            // Remove tracking parameters
-            trackingParams.forEach(param => {
-                urlObj.searchParams.delete(param);
-            });
-            
-            // Also remove any param that starts with tracked prefixes
-            const paramsToDelete = [];
-            for (const [key] of urlObj.searchParams) {
-                if (key.startsWith('utm_') || 
-                    key.startsWith('ref') || 
-                    key.startsWith('pf_') || 
-                    key.startsWith('pd_') ||
-                    key.startsWith('mc_')) {
-                    paramsToDelete.push(key);
-                }
-            }
-            paramsToDelete.forEach(param => urlObj.searchParams.delete(param));
-            
-            const cleanedUrl = urlObj.toString();
-            log(`Cleaned URL: "${cleanedUrl}"`);
+
+        if (!url) {
+            log('URL missing, returning original value');
             logFunctionEnd('cleanUrl');
-            return cleanedUrl;
-            
+            return url;
+        }
+
+        let urlObj;
+        try {
+            urlObj = new URL(url);
         } catch (error) {
             logError(`Error cleaning URL: ${error.message}`);
             log('Returning original URL');
             logFunctionEnd('cleanUrl');
             return url;
         }
+
+        const hostname = urlObj.hostname || '';
+        const isAmazonHost = isAmazonHostname(hostname);
+
+        if (isAmazonHost) {
+            const toolkit = getAmazonToolkit();
+            const cleanAmazonFn = toolkit?.Links?.cleanAmazonURL;
+            if (typeof cleanAmazonFn === 'function') {
+                const cleanedAmazonUrl = cleanAmazonFn(url, { preserveVariants: true, preserveSeller: false });
+                if (cleanedAmazonUrl) {
+                    log(`Toolkit cleaned Amazon URL: "${cleanedAmazonUrl}"`);
+                    logFunctionEnd('cleanUrl');
+                    return cleanedAmazonUrl;
+                }
+                logWarn('Toolkit cleanAmazonURL returned null, falling back to legacy Amazon cleaning');
+            } else {
+                log('Amazon toolkit unavailable, using legacy Amazon cleaning');
+            }
+
+            const asinMatch = urlObj.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/);
+            if (asinMatch) {
+                const asin = asinMatch[1];
+                const legacyAmazonUrl = `https://${hostname}/dp/${asin}`;
+                log(`Legacy Amazon clean produced URL: "${legacyAmazonUrl}"`);
+                logFunctionEnd('cleanUrl');
+                return legacyAmazonUrl;
+            }
+
+            log('Could not extract ASIN, will fall through to general cleaning');
+        }
+
+        // General tracking parameter removal
+        log('Removing common tracking parameters');
+        const trackingParams = [
+            // Google Analytics
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+            // Facebook
+            'fbclid',
+            // Google Ads
+            'gclid', 'gclsrc',
+            // Amazon tracking
+            'ref', 'ref_', 'pf_rd_r', 'pf_rd_p', 'pf_rd_m', 'pf_rd_s', 'pf_rd_t', 'pf_rd_i',
+            'pd_rd_r', 'pd_rd_w', 'pd_rd_wg',
+            'qid', 'sr', 'keywords', 'crid', 'sprefix', 'th', 'psc',
+            'dib', 'dib_tag',
+            // Marketing campaign
+            'mc_cid', 'mc_eid',
+            // General analytics
+            '_ga', '_gl',
+            // Other common tracking
+            'msclkid', 'twclid'
+        ];
+
+        trackingParams.forEach((param) => {
+            urlObj.searchParams.delete(param);
+        });
+
+        const paramsToDelete = [];
+        for (const [key] of urlObj.searchParams) {
+            if (key.startsWith('utm_') ||
+                key.startsWith('ref') ||
+                key.startsWith('pf_') ||
+                key.startsWith('pd_') ||
+                key.startsWith('mc_')) {
+                paramsToDelete.push(key);
+            }
+        }
+        paramsToDelete.forEach((param) => urlObj.searchParams.delete(param));
+
+        const cleanedUrl = urlObj.toString();
+        log(`Cleaned URL: "${cleanedUrl}"`);
+        logFunctionEnd('cleanUrl');
+        return cleanedUrl;
     }
 
     // ============================================================================
@@ -1320,6 +1433,24 @@
      */
     function extractUrlFromAnchor(anchor, event) {
         logFunctionBegin('extractUrlFromAnchor');
+        let toolkitAmazonUrl = null;
+
+        if (anchor && anchor.href) {
+            try {
+                const anchorUrlObj = new URL(anchor.href, window.location.href);
+                if (isAmazonHostname(anchorUrlObj.hostname || '')) {
+                    toolkitAmazonUrl = getAmazonUrlFromAnchor(anchor);
+                }
+            } catch (error) {
+                logWarn(`Failed to parse anchor href for Amazon detection: ${error.message}`);
+            }
+        }
+
+        if (toolkitAmazonUrl) {
+            log('Toolkit provided Amazon URL, skipping legacy extraction strategies');
+            logFunctionEnd('extractUrlFromAnchor');
+            return toolkitAmazonUrl;
+        }
         
         // Strategy 1: Try standard href property (browser auto-resolves)
         if (anchor && anchor.href) {
@@ -1374,21 +1505,26 @@
         logWarn(`Strategy 3 failed: No valid anchor found in ${depth} parent elements`);
         
         // Strategy 4: Amazon-specific - Extract ASIN from data-asin attribute
-        if (window.location.hostname.includes('amazon')) {
+        if (isAmazonHostname(window.location.hostname || '')) {
             log('Strategy 4: Attempting Amazon ASIN extraction');
             
-            const targetElement = event.target;
-            const asinContainer = targetElement.closest('[data-asin]');
+            const targetElement = event?.target || null;
+            const asinContainer = targetElement && typeof targetElement.closest === 'function'
+                ? targetElement.closest('[data-asin]')
+                : null;
             
             if (asinContainer) {
                 const asin = asinContainer.getAttribute('data-asin');
                 log(`  Found ASIN container with ASIN: "${asin}"`);
                 
                 if (asin) {
-                    const amazonUrl = `https://${window.location.hostname}/dp/${asin}`;
-                    log(`Strategy 4: Constructed Amazon URL: "${amazonUrl}"`);
-                    logFunctionEnd('extractUrlFromAnchor');
-                    return amazonUrl;
+                    const amazonUrl = buildAmazonUrlFromAsin(asin);
+                    if (amazonUrl) {
+                        log(`Strategy 4: Constructed Amazon URL: "${amazonUrl}"`);
+                        logFunctionEnd('extractUrlFromAnchor');
+                        return amazonUrl;
+                    }
+                    logWarn('Strategy 4: Failed to build Amazon URL from ASIN');
                 }
             }
             

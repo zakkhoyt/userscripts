@@ -452,22 +452,28 @@ function safeText(element) { /* Implementation in dom_helpers.js */ return null;
 function safeAttr(element, attr) { /* Implementation in dom_helpers.js */ return null; }
 function logError(...args) { /* Implementation in logging_helpers.js */ }
 
-// Export all functions
+const LinkParser = {
+    parseAmazonURL,
+    parseAmazonAnchor,
+    cleanAnchorText,
+    determineURLType,
+    extractASINFromURL,
+    extractStoreIDFromURL,
+    extractSellerIDFromURL,
+    parseQueryParams,
+    extractVariantParams,
+    extractTrackingParams,
+    buildCleanURL,
+    extractImageIDFromURL,
+    parseAmazonURLsFromText,
+    extractAmazonAnchorsFromDOM
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        parseAmazonURL,
-        parseAmazonAnchor,
-        cleanAnchorText,
-        determineURLType,
-        extractASINFromURL,
-        extractStoreIDFromURL,
-        extractSellerIDFromURL,
-        parseQueryParams,
-        extractVariantParams,
-        extractTrackingParams,
-        buildCleanURL,
-        extractImageIDFromURL,
-        parseAmazonURLsFromText,
-        extractAmazonAnchorsFromDOM
-    };
+    module.exports = LinkParser;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['links/link_parser'] = LinkParser;
 }

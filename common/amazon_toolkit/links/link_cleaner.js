@@ -247,14 +247,20 @@ function isValidASIN(value) {
 function logWarn(...args) { /* Implementation in logging_helpers.js */ }
 function logError(...args) { /* Implementation in logging_helpers.js */ }
 
-// Export all functions
+const LinkCleaner = {
+    cleanAmazonURL,
+    buildAmazonURL,
+    cleanProductTitle,
+    shortenTitle,
+    removeTrackingParams,
+    normalizeAmazonHostname
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        cleanAmazonURL,
-        buildAmazonURL,
-        cleanProductTitle,
-        shortenTitle,
-        removeTrackingParams,
-        normalizeAmazonHostname
-    };
+    module.exports = LinkCleaner;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['links/link_cleaner'] = LinkCleaner;
 }

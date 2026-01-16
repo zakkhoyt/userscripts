@@ -293,25 +293,31 @@ function isValidDocument(value) {
     return value && typeof value.querySelector === 'function';
 }
 
+const ValidationHelpers = {
+    ASIN_PATTERN,
+    PRODUCT_URL_PATTERNS,
+    STORE_URL_PATTERNS,
+    AMAZON_DOMAIN_PATTERN,
+    isValidASIN,
+    isValidURL,
+    isAmazonURL,
+    isAmazonProductURL,
+    isAmazonStoreURL,
+    isAmazonImageURL,
+    isNonEmptyString,
+    isValidPrice,
+    isNonEmptyArray,
+    isNonEmptyObject,
+    isValidElement,
+    isValidDocument
+};
+
 // Export all validation functions
 if (typeof module !== 'undefined' && module.exports) {
-    // Node.js / CommonJS export
-    module.exports = {
-        ASIN_PATTERN,
-        PRODUCT_URL_PATTERNS,
-        STORE_URL_PATTERNS,
-        AMAZON_DOMAIN_PATTERN,
-        isValidASIN,
-        isValidURL,
-        isAmazonURL,
-        isAmazonProductURL,
-        isAmazonStoreURL,
-        isAmazonImageURL,
-        isNonEmptyString,
-        isValidPrice,
-        isNonEmptyArray,
-        isNonEmptyObject,
-        isValidElement,
-        isValidDocument
-    };
+    module.exports = ValidationHelpers;
+}
+
+if (typeof window !== 'undefined') {
+    window.__AmazonToolkitModules = window.__AmazonToolkitModules || {};
+    window.__AmazonToolkitModules['helpers/validation_helpers'] = ValidationHelpers;
 }
