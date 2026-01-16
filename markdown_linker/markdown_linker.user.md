@@ -28,11 +28,21 @@
 
 
 
-* [ ] For amazon product and amazon shop/store urls, let's delete some additional phrases and regexes from the composed title
+<!-- * [ ] For `amazon product` and `amazon shop/store` urls, let's delete some additional phrases and regexes from the composed title -->
+* [ ] For `amazon.com` urls, we convert it into a title and a url. 
+  * Before this title and url are used to compose the markdown link, I want to do some additional find/replace when the original URL's domain is `amazon.com`
+    * 
   * [ ] Do this no matter which menu entry was clicked on, no matter how the script was invoked.
 
 *  [Amazon Grocery, Mexican-Style Four Cheese Blend, 8 Oz (Previously Happy Belly Packaging May Vary) : Grocery & Gourmet Food](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
 
+
+* [ ] several of the amazon related functions in `markdown_linker/markdown_linker.user.js` should maybe reside instead in `amazon_toolkit`. 
+  * [ ] Also, there are many functions in amazon_toolkit that can improve `markdown_linker/markdown_linker.user.js`
+    * [ ] classify amazon.com urls as "product url", "store url"
+    * [ ] classify amazon product urls as "dp", "asin", etc..
+  * Prompted DRY
+  * Smaller userscript
 
 
 [B075 Y8 Zv89](https://www.amazon.com/dp/B075Y8ZV89)
