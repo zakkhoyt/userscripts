@@ -4,6 +4,9 @@
 
 # IDEAS
 
+* let's update this script so that if the url contains `amazon.com`, then always remove `Amazon.com: ` from the computed title
+
+
 
 ## Youtube 
 

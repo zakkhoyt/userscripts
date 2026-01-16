@@ -7,6 +7,14 @@
 #
 # TODO: zakkhoyt AI - about script
 #
+# ---- ---- ----     TODOs     ---- ---- ----
+
+# TODO: zakkhoyt - Killing the script properly (ctrl+c) results in: `^C[ERROR] Script failed at line 480 with exit code 130`, then 
+# $? prints 1. This shoudl be a clean exit IMO, but do not mistake this for failing to launch the server in the first place .
+
+# TODO: zakkhoyt - when opening Firefox to the user script is it possibel to also configure auto reloading on save/file change?
+
+
 # ---- ---- ----     Source Utilities     ---- ---- ----
 
 

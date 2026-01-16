@@ -135,28 +135,6 @@
     document.addEventListener('selectionchange', () => {
         const selection = window.getSelection ? window.getSelection() : null;
         if (!selection) {
-            return;
-        }
-        const selectedText = selection.toString().trim();
-        if (selectedText) {
-            lastNonEmptySelection = selectedText;
-            lastSelectionTimestamp = Date.now();
-        }
-    });
-
-    // Alt+Z title preference options (first element is default)
-    const ALT_Z_TITLE_PREF_KEY = 'markdown_linker.altz_title_source';
-    const ALT_Z_TITLE_OPTIONS = [
-        { id: 'url-forward', label: 'URL (front)' },
-        { id: 'url-reverse', label: 'URL (reverse)' },
-        { id: 'anchor', label: 'Anchor text' },
-        { id: 'page', label: 'Page title' }
-    ];
-    let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
-    let altZMenuCommandId = null;
-
-    // ============================================================================
-    // LOGGING UTILITIES
     // ============================================================================
 
     /**
@@ -671,7 +649,8 @@
         }
 
         const option = {
-            label: decoratedTitle,
+            label: 'Timestamp',
+            displayValue: decoratedTitle,
             getResult: () => ({
                 title: decoratedTitle,
                 url: timestampUrl
@@ -1002,21 +981,13 @@
         if (context.video) {
             const videoTitle = buildYouTubeVideoTitle(context.video);
             if (videoTitle) {
+                log('Adding YouTube video title option');
                 options.push({
-                    label: videoTitle,
+                    label: 'Video Title',
+                    displayValue: videoTitle,
                     getResult: () => ({
                         title: videoTitle,
                         url: capturedUrl
-                    })
-                });
-            }
-
-            if (context.video.shortUrl && context.video.shortUrl !== capturedUrl) {
-                options.push({
-                    label: 'YouTube Short Link',
-                    getResult: () => ({
-                        title: videoTitle || context.video.title || 'YouTube Video',
-                        url: context.video.shortUrl
                     })
                 });
             }
@@ -1032,31 +1003,34 @@
         if (context.playlist && context.playlist.videos && context.playlist.videos.length > 0) {
             const playlistMarkdown = buildYouTubePlaylistMarkdown(context.playlist);
             if (playlistMarkdown) {
+                log('Adding YouTube playlist markdown option');
                 options.push({
-                    label: `YouTube Playlist → Markdown List (${context.playlist.videos.length})`,
+                    label: 'Playlist Markdown',
+                    displayValue: `${context.playlist.videos.length} entries`,
                     getValue: () => playlistMarkdown,
                     isAllLinks: true
                 });
             }
 
-            const playlistTitle = context.playlist.title
-                ? `YouTube Playlist: ${context.playlist.title}`
-                : 'YouTube Playlist';
+            const playlistTitle = context.playlist.title || context.playlist.url || 'YouTube Playlist';
+            log('Adding YouTube playlist link option');
             options.push({
-                label: playlistTitle,
+                label: 'Playlist Link',
+                displayValue: playlistTitle,
                 getResult: () => ({
-                    title: playlistTitle,
+                    title: context.playlist.title ? `YouTube Playlist: ${context.playlist.title}` : 'YouTube Playlist',
                     url: context.playlist.url || capturedUrl
                 })
             });
         }
 
         if (context.channel && context.channel.title) {
-            const channelTitle = `YouTube Channel: ${context.channel.title}`;
+            log('Adding YouTube channel link option');
             options.push({
-                label: channelTitle,
+                label: 'Channel Link',
+                displayValue: context.channel.title,
                 getResult: () => ({
-                    title: channelTitle,
+                    title: `YouTube Channel: ${context.channel.title}`,
                     url: context.channel.canonicalUrl || capturedUrl
                 })
             });
@@ -1481,6 +1455,60 @@
         lastSelectionTimestamp = 0;
         logFunctionEnd('clearSelectionCache');
     }
+
+        /**
+         * Copies markdown using a selection value without showing the menu
+         * @param {string|null} selectedText - Highlighted text to use as title
+         * @param {string|null} resolvedUrl - URL to pair with the selection
+         * @returns {boolean} True when clipboard copy succeeded and menu should be skipped
+         */
+        function handleSelectionAutoCopy(selectedText, resolvedUrl) {
+            logFunctionBegin('handleSelectionAutoCopy');
+            if (!selectedText || !resolvedUrl) {
+                log('Selection text or URL missing, cannot auto-copy');
+                logFunctionEnd('handleSelectionAutoCopy');
+                return false;
+            }
+
+            const markdown = createMarkdown(selectedText, resolvedUrl);
+            if (!markdown) {
+                logError('Failed to build markdown for selection auto-copy');
+                logFunctionEnd('handleSelectionAutoCopy');
+                return false;
+            }
+
+            copyToClipboard(markdown, selectedText, resolvedUrl);
+            showNotification('Selection copied to clipboard');
+            clearSelectionCache('selection auto copied');
+            logFunctionEnd('handleSelectionAutoCopy');
+            return true;
+        }
+
+        /**
+         * Attempts to copy the current selection automatically when allowed
+         * @param {boolean} skipAutoCopy - True when feature should not run (e.g., auto-infer mode)
+         * @param {string|null} resolvedUrl - URL to pair with the selection
+         * @returns {boolean} True when selection was copied and menu should be skipped
+         */
+        function maybeAutoCopySelection(skipAutoCopy, resolvedUrl) {
+            logFunctionBegin('maybeAutoCopySelection');
+            if (skipAutoCopy) {
+                log('Auto-copy skipped by caller');
+                logFunctionEnd('maybeAutoCopySelection');
+                return false;
+            }
+
+            const selectionText = getSelectedText();
+            if (!selectionText) {
+                log('No selection text available for auto-copy');
+                logFunctionEnd('maybeAutoCopySelection');
+                return false;
+            }
+
+            const result = handleSelectionAutoCopy(selectionText, resolvedUrl);
+            logFunctionEnd('maybeAutoCopySelection');
+            return result;
+        }
 
     /**
      * Gets the current page's title from document
@@ -2381,10 +2409,10 @@
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: rgba(32, 33, 36, 0.94);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+            background: rgba(18, 19, 22, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 14px;
+            box-shadow: 0 22px 45px rgba(0, 0, 0, 0.65);
             padding: 6px 0;
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -2393,7 +2421,7 @@
             max-width: 520px;
             width: max-content;
             color: #f8f9fa;
-            backdrop-filter: blur(18px);
+            backdrop-filter: blur(26px) saturate(120%);
         `;
         log('Did create menu element');
 
@@ -2403,40 +2431,33 @@
         // Type: Array<{label: string, getValue?: () => string|null, getResult?: () => ({title: string, url?: string}), isAllLinks?: boolean}>
         // Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array
         const options = [];
+        const domainSectionOptions = [];
         
         if (isAnchor) {
             log('Is anchor, will get link text');
             const linkText = getLinkText(anchor);
             if (linkText) {
                 log(`Did get link text, adding to options: "${linkText}"`);
-                options.push({ label: `Link: ${linkText}`, getValue: () => linkText });
+                options.push({
+                    label: 'Link Text',
+                    displayValue: linkText,
+                    getValue: () => linkText
+                });
             } else {
                 log('No link text available');
             }
         }
 
         // Common options for both anchor and page
-        log('Will get selected text');
-        const selectedText = getSelectedText();
-        if (selectedText) {
-            log(`Did get selected text, adding to options: "${selectedText}"`);
-            const selectionOptionValue = selectedText;
-            options.push({
-                label: `Selection: ${selectionOptionValue}`,
-                getValue: () => {
-                    clearSelectionCache('menu selection used');
-                    return selectionOptionValue;
-                }
-            });
-        } else {
-            log('No selected text available');
-        }
-
         log('Will get page title');
         const pageTitle = getPageTitle();
         if (pageTitle) {
             log(`Did get page title, adding to options: "${pageTitle}"`);
-            options.push({ label: `Page: ${pageTitle}`, getValue: () => pageTitle });
+            options.push({
+                label: 'Page Title',
+                displayValue: pageTitle,
+                getValue: () => pageTitle
+            });
         } else {
             log('No page title available');
         }
@@ -2446,7 +2467,11 @@
             const urlComponentTitle = getUrlComponentTitle(capturedUrl);
             if (urlComponentTitle) {
                 log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
-                options.push({ label: `URL: ${urlComponentTitle}`, getValue: () => urlComponentTitle });
+                options.push({
+                    label: 'URL (forward)',
+                    displayValue: urlComponentTitle,
+                    getValue: () => urlComponentTitle
+                });
             } else {
                 log('URL component title unavailable');
             }
@@ -2454,7 +2479,11 @@
             const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: 'reverse' });
             if (urlComponentTitleLRU) {
                 log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
-                options.push({ label: `LRU: ${urlComponentTitleLRU}`, getValue: () => urlComponentTitleLRU });
+                options.push({
+                    label: 'URL (reverse)',
+                    displayValue: urlComponentTitleLRU,
+                    getValue: () => urlComponentTitleLRU
+                });
             } else {
                 log('Reverse URL component title unavailable');
             }
@@ -2463,10 +2492,16 @@
         if (youtubeContext) {
             log('YouTube context available, will append specialized menu options');
             const youtubeOptions = buildYouTubeMenuOptions(youtubeContext, capturedUrl);
-            youtubeOptions.forEach((optionDescriptor) => {
-                log(`Adding YouTube option: ${optionDescriptor.label}`);
-                options.push(optionDescriptor);
-            });
+            if (youtubeOptions.length > 0) {
+                domainSectionOptions.push({
+                    isSectionHeader: true,
+                    label: 'YouTube'
+                });
+                youtubeOptions.forEach((optionDescriptor) => {
+                    log(`Queueing YouTube option: ${optionDescriptor.label}`);
+                    domainSectionOptions.push(optionDescriptor);
+                });
+            }
         }
 
         if (!isAnchor && !youtubeContext) {
@@ -2474,26 +2509,33 @@
             const metaDesc = getMetaDescription();
             if (metaDesc) {
                 log(`Did get meta description, adding to options: "${metaDesc}"`);
-                options.push({ label: `Meta: ${metaDesc}`, getValue: () => metaDesc });
+                options.push({
+                    label: 'Meta Description',
+                    displayValue: metaDesc,
+                    getValue: () => metaDesc
+                });
             } else {
                 log('No meta description available');
             }
         }
 
-        // Always add custom title option
-        log('Adding custom title option');
-        options.push({ label: 'Custom', getValue: promptCustomTitle });
+        if (domainSectionOptions.length > 0) {
+            log(`Adding ${domainSectionOptions.length} domain-specific entries (including headers)`);
+            domainSectionOptions.forEach((optionDescriptor) => options.push(optionDescriptor));
+        }
         
         // Add separator and "All Links" options at the bottom
         log('Adding extract all links options');
         options.push({ 
-            label: 'all (flat)', 
+            label: 'All Links (flat)', 
+            displayValue: 'Single-level list',
             getValue: extractAllLinksFlat,
             isAllLinks: true,
             isSeparator: true  // Add visual separator above this item
         });
         options.push({ 
-            label: 'all (tree)', 
+            label: 'All Links (tree)', 
+            displayValue: 'Preserves heading depth',
             getValue: extractAllLinksHierarchical,
             isAllLinks: true 
         });
@@ -2503,20 +2545,80 @@
         // Create menu items
         log('Will create menu items');
         options.forEach((option, index) => {
-            log(`Creating menu item ${index}: "${option.label}"`);
+            const debugLabel = option.displayValue ? `${option.label}: ${option.displayValue}` : option.label;
+            log(`Creating menu item ${index}: "${debugLabel}"`);
+
+            if (option.isSectionHeader) {
+                const headerWrapper = document.createElement('div');
+                headerWrapper.style.cssText = `
+                    margin-top: 12px;
+                    padding: 0 12px;
+                `;
+
+                const headerLine = document.createElement('div');
+                headerLine.style.cssText = `
+                    border-top: 1px solid rgba(255, 255, 255, 0.55);
+                    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+                `;
+
+                const headerLabel = document.createElement('div');
+                headerLabel.textContent = option.label;
+                headerLabel.style.cssText = `
+                    margin-top: 6px;
+                    padding: 4px 2px 2px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.18em;
+                    font-size: 10px;
+                    font-weight: 600;
+                    color: rgba(255, 255, 255, 0.85);
+                    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+                `;
+
+                headerWrapper.appendChild(headerLine);
+                headerWrapper.appendChild(headerLabel);
+                menu.appendChild(headerWrapper);
+                return;
+            }
+
             const item = document.createElement('div');
-            item.textContent = option.label;
             item.style.cssText = `
                 padding: 8px 14px;
                 cursor: pointer;
                 white-space: normal;
-                line-height: 1.45;
+                line-height: 1.4;
                 word-break: break-word;
                 color: inherit;
                 background-color: transparent;
                 transition: background-color 120ms ease;
-                ${option.isSeparator ? 'border-top: 1px solid rgba(255,255,255,0.08); margin-top: 6px; padding-top: 12px;' : ''}
+                ${option.isSeparator ? 'border-top: 2px solid rgba(255,255,255,0.65); box-shadow: 0 -1px 0 rgba(0,0,0,0.65); margin-top: 12px; padding-top: 18px;' : ''}
             `;
+
+            const labelElement = document.createElement('div');
+            if (option.displayValue) {
+                labelElement.textContent = option.label;
+                labelElement.style.cssText = `
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    color: rgba(248, 249, 250, 0.65);
+                    margin-bottom: 2px;
+                `;
+                const valueElement = document.createElement('div');
+                valueElement.textContent = option.displayValue;
+                valueElement.style.cssText = `
+                    font-size: 12px;
+                    color: #f8f9fa;
+                `;
+                item.appendChild(labelElement);
+                item.appendChild(valueElement);
+            } else {
+                labelElement.textContent = option.label;
+                labelElement.style.cssText = `
+                    font-size: 12px;
+                    color: #f8f9fa;
+                `;
+                item.appendChild(labelElement);
+            }
 
             item.addEventListener('mouseenter', () => {
                 item.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
@@ -2782,6 +2884,11 @@
                     log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
                 } else {
                     log('In normal mode, will create menu for anchor');
+                    if (maybeAutoCopySelection(false, targetUrl)) {
+                        log('Selection auto-copied; skipping menu for anchor click');
+                        logFunctionEnd('handleClick');
+                        return;
+                    }
                     createMenu(event.clientX, event.clientY, true, anchor);
                 }
             } else {
@@ -2800,6 +2907,11 @@
                     log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
                 } else {
                     log('In normal mode, will create menu for page (fallback)');
+                    if (maybeAutoCopySelection(false, targetUrl)) {
+                        log('Selection auto-copied; skipping fallback menu');
+                        logFunctionEnd('handleClick');
+                        return;
+                    }
                     createMenu(event.clientX, event.clientY, false);
                 }
             }
@@ -2821,6 +2933,11 @@
                 log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
             } else {
                 log('In normal mode, will create menu for page');
+                if (maybeAutoCopySelection(false, targetUrl)) {
+                    log('Selection auto-copied; skipping page menu');
+                    logFunctionEnd('handleClick');
+                    return;
+                }
                 createMenu(event.clientX, event.clientY, false);
             }
         }
@@ -2865,6 +2982,11 @@
                 targetUrl = cleanUrl(targetUrl);
                 log(`Cleaned URL: "${targetUrl}"`);
                 log('Will create menu for anchor');
+                if (maybeAutoCopySelection(false, targetUrl)) {
+                    log('Selection auto-copied; skipping context menu for anchor');
+                    logFunctionEnd('handleContextMenu');
+                    return;
+                }
                 createMenu(event.clientX, event.clientY, true, anchor);
             } else {
                 logError('URL validation failed, using current page URL as fallback');
@@ -2872,6 +2994,11 @@
                 targetElement = null;
                 log(`Set targetUrl to current page: "${targetUrl}"`);
                 log('Will create menu for page (fallback)');
+                if (maybeAutoCopySelection(false, targetUrl)) {
+                    log('Selection auto-copied; skipping fallback context menu');
+                    logFunctionEnd('handleContextMenu');
+                    return;
+                }
                 createMenu(event.clientX, event.clientY, false);
             }
         } else {
@@ -2880,6 +3007,11 @@
             targetElement = null;
             log(`Set targetUrl to current page: "${targetUrl}"`);
             log('Will create menu for page');
+            if (maybeAutoCopySelection(false, targetUrl)) {
+                log('Selection auto-copied; skipping context menu for page');
+                logFunctionEnd('handleContextMenu');
+                return;
+            }
             createMenu(event.clientX, event.clientY, false);
         }
         
@@ -2977,6 +3109,11 @@
                     targetUrl = cleanUrl(targetUrl);
                     log(`Cleaned URL: "${targetUrl}"`);
                     log('Will create menu for anchor');
+                    if (maybeAutoCopySelection(false, targetUrl)) {
+                        log('Selection auto-copied; skipping keyboard anchor menu');
+                        logFunctionEnd('handleKeydown');
+                        return;
+                    }
                     createMenu(mouseX, mouseY, true, anchor);
                 } else {
                     logError('URL validation failed, using current page URL as fallback');
@@ -2984,6 +3121,11 @@
                     targetElement = null;
                     log(`Set targetUrl to current page: "${targetUrl}"`);
                     log('Will create menu for page (fallback)');
+                    if (maybeAutoCopySelection(false, targetUrl)) {
+                        log('Selection auto-copied; skipping keyboard fallback menu');
+                        logFunctionEnd('handleKeydown');
+                        return;
+                    }
                     createMenu(mouseX, mouseY, false);
                 }
             } else {
@@ -2992,6 +3134,11 @@
                 targetElement = null;
                 log(`Set targetUrl to current page: "${targetUrl}"`);
                 log('Will create menu for page');
+                if (maybeAutoCopySelection(false, targetUrl)) {
+                    log('Selection auto-copied; skipping keyboard page menu');
+                    logFunctionEnd('handleKeydown');
+                    return;
+                }
                 createMenu(mouseX, mouseY, false);
             }
             logFunctionEnd('handleKeydown');
