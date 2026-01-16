@@ -452,20 +452,35 @@ if [[ ${#dev_open_targets[@]} -eq 0 ]]; then
 else
   slog_step_se --context success "Found ${#dev_open_targets[@]} #dev-open directive(s)"
   for dev_target in "${dev_open_targets[@]}"; do
-  open_cmd=(open "${(qqq)dev_target}")
-    if [[ "$is_dry_run" == "true" ]]; then
-      slog_step_se --context info "Would open dev target: " --url "${(qq)dev_target}" --default " with command: " --code "${open_cmd[@]}" --default
+    # open_cmd=(open "${(qqq)dev_target}")
+    # if [[ "$is_dry_run" == "true" ]]; then
+    #   slog_step_se --context info "Would open dev target: " --url "${(qq)dev_target}" --default " with command: " --code "${open_cmd[@]}" --default
+    #   continue
+    # fi
+
+    # slog_step_se --context will "Open dev target: " --url "${(qq)dev_target}" --default " with command: " --code "${open_cmd[@]}" --default
+    # # if $open_cmd; then
+    # # if $(eval "$open_cmd"); then
+    # if $(eval "${open_cmd[@]}"); then
+    #   slog_step_se --context success "Opened dev target: " --url "${(qq)dev_target}" --default
+    # else
+    #   exit_code=$?
+    #   slog_step_se --context warning --exit-code "$exit_code" "Failed to open dev target: " --url "${(qq)dev_target}" --default
+    # fi
+
+
+    typeset -a open_command_tokens=(open ${(qqq)dev_target})
+    typeset open_command_string="${(j| |)open_command_tokens}"
+    if [[ -n "$is_dry_run" ]]; then
+      slog_step_se --context dry-run "Would open dev target with command: " --code "${open_command_string}" --default
       continue
     fi
-
-    slog_step_se --context will "Open dev target: " --url "${(qq)dev_target}" --default " with command: " --code "${open_cmd[@]}" --default
-    # if $open_cmd; then
-    # if $(eval "$open_cmd"); then
-    if $(eval "${open_cmd[@]}"); then
-      slog_step_se --context success "Opened dev target: " --url "${(qq)dev_target}" --default
+    slog_step_se_d --context will "Will open dev target with command: " --code "${open_command_string}" --default
+    if ("${open_command_tokens[@]}"); then
+      slog_step_se --context success "Did open dev target with command: " --code "${open_command_string}" --default
     else
-      exit_code=$?
-      slog_step_se --context warning --exit-code "$exit_code" "Failed to open dev target: " --url "${(qq)dev_target}" --default
+      rval="$?"
+      slog_step_se --context warning --rval "$rval" "Could not open dev target with command: " --code "${open_command_string}" --default
     fi
   done
 fi

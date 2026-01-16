@@ -135,6 +135,28 @@
     document.addEventListener('selectionchange', () => {
         const selection = window.getSelection ? window.getSelection() : null;
         if (!selection) {
+            return;
+        }
+
+        const text = selection.toString().trim();
+        if (!text) {
+            return;
+        }
+
+        lastNonEmptySelection = text;
+        lastSelectionTimestamp = Date.now();
+    });
+
+    // Alt+Z title preference options (first element is default)
+    const ALT_Z_TITLE_PREF_KEY = 'markdown_linker.altz_title_source';
+    const ALT_Z_TITLE_OPTIONS = [
+        { id: 'url-forward', label: 'URL (front)' },
+        { id: 'url-reverse', label: 'URL (reverse)' },
+        { id: 'anchor', label: 'Anchor text' },
+        { id: 'page', label: 'Page title' }
+    ];
+    let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+    let altZMenuCommandId = null;
     // ============================================================================
 
     /**
@@ -1470,14 +1492,19 @@
                 return false;
             }
 
-            const markdown = createMarkdown(selectedText, resolvedUrl);
+            const sanitizedUrl = cleanUrl(resolvedUrl) || resolvedUrl;
+            if (sanitizedUrl !== resolvedUrl) {
+                log(`Sanitized selection auto-copy URL: "${sanitizedUrl}"`);
+            }
+
+            const markdown = createMarkdown(selectedText, sanitizedUrl);
             if (!markdown) {
                 logError('Failed to build markdown for selection auto-copy');
                 logFunctionEnd('handleSelectionAutoCopy');
                 return false;
             }
 
-            copyToClipboard(markdown, selectedText, resolvedUrl);
+            copyToClipboard(markdown, selectedText, sanitizedUrl);
             showNotification('Selection copied to clipboard');
             clearSelectionCache('selection auto copied');
             logFunctionEnd('handleSelectionAutoCopy');
@@ -1862,10 +1889,14 @@
     function autoInferAndCopyMarkdown(url, anchor) {
         logFunctionBegin('autoInferAndCopyMarkdown');
         log(`Will auto-infer and copy markdown for URL: "${url}"`);
+        const resolvedUrl = cleanUrl(url) || url;
+        if (resolvedUrl !== url) {
+            log(`Sanitized auto-infer URL: "${resolvedUrl}"`);
+        }
         
         // Get the auto-inferred title using priority logic
         log('Will get auto-inferred title');
-        const title = getAutoInferredTitle(anchor, url);
+        const title = getAutoInferredTitle(anchor, resolvedUrl);
         
         if (!title) {
             log('Auto-infer failed - no title source available');
@@ -1879,7 +1910,7 @@
         
         // Create markdown link
         log('Will create markdown');
-        const markdown = createMarkdown(title, url);
+        const markdown = createMarkdown(title, resolvedUrl);
         log(`Did create markdown: "${markdown}"`);
         
         // Copy to clipboard
@@ -1924,17 +1955,22 @@
         
         // Helper to format a single item with title inference
         const formatBufferItem = (item, asList = true) => {
-            const title = getAutoInferredTitle(item.anchor, item.url);
+            const resolvedUrl = cleanUrl(item.url) || item.url;
+            if (resolvedUrl !== item.url) {
+                log(`Sanitized buffered URL: "${resolvedUrl}"`);
+            }
+
+            const title = getAutoInferredTitle(item.anchor, resolvedUrl);
             if (!title) {
                 try {
-                    const url = new URL(item.url);
+                    const url = new URL(resolvedUrl);
                     const fallbackTitle = url.hostname || 'Link';
-                    return asList ? `* [${fallbackTitle}](${item.url})` : `[${fallbackTitle}](${item.url})`;
+                    return asList ? `* [${fallbackTitle}](${url.href})` : `[${fallbackTitle}](${url.href})`;
                 } catch (e) {
-                    return asList ? `* [Link](${item.url})` : `[Link](${item.url})`;
+                    return asList ? `* [Link](${resolvedUrl})` : `[Link](${resolvedUrl})`;
                 }
             }
-            return asList ? `* [${title}](${item.url})` : `[${title}](${item.url})`;
+            return asList ? `* [${title}](${resolvedUrl})` : `[${title}](${resolvedUrl})`;
         };
         
         // Special case: single link - no list formatting
