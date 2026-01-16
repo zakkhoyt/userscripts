@@ -1,10 +1,69 @@
 
+# IDEAS
+
+* [X] ~~*For the amazon.com domain, omit leading `Amazon: ` or `Amazon.com: ` from the composed title that we build for the markdown link*~~ [2026-01-15]
+  * [X] ~~*Do this no matter which menu entry was clicked on, no matter how the script was invoked.*~~ [2026-01-15] 
+
+
+
+* [ ] for amazon products, change the opt+z+click behavior from `url reverse` to `url forward`
+  * [ ] url reverse gives unreadable results on this domain. EX: 
+    * [ ] url reverse: `[Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)`
+    * [ ] page title: [Amazon Grocery, Mexican-Style Four Cheese Blend, 8 Oz (Previously Happy Belly Packaging May Vary) : Grocery & Gourmet Food](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
+* [X] It's still always using `URL (reverse)` despite what the preference is set to for amazon products
+  * [X] As I cycle through that preference, one of the entires is printed as `28 Alt+Z title: URL (front) (click to cycle)`.
+    * I'm not sure that this is supposed to correlate to? 
+    * IN the popup menu, there are
+      * URL (FORWARD)
+      * URL (REVERSE)
+    * is (front) supposed to be (forward)? or is there something else going on?
+  * [X] the `URL (REVERSE)` option is ding something weird:
+    * EX; 
+      * the url: `https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2`
+      * expected: [B075Y8ZV89 dp](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
+      * actual: [B075 Y8 Zv89](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
+    * [X] whe are spaces being inserted into `B075Y8ZV89`?
+    * [X] where is `dp`? It's supposed to take the last two path components right?
+
+
+
+
+* [ ] For amazon product and amazon shop/store urls, let's delete some additional phrases and regexes from the composed title
+  * [ ] Do this no matter which menu entry was clicked on, no matter how the script was invoked.
+
+*  [Amazon Grocery, Mexican-Style Four Cheese Blend, 8 Oz (Previously Happy Belly Packaging May Vary) : Grocery & Gourmet Food](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
+
+
+
+[B075 Y8 Zv89](https://www.amazon.com/dp/B075Y8ZV89)
+
+
+
+[Amazon: Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)
+[Amazon: Dp - B075 Y8 Zv89](https://www.amazon.com/dp/B075Y8ZV89)
+
+current: [Amazon: Mexican Style Previously Happy Belly Packaging - Dp](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B08J4QQJ3K?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-1)
+
+
+
+[Amazon Grocery, Mexican-Style Four Cheese Blend, Finely Shredded, 16 Oz (Previously Happy Belly Packaging May Vary)](https://www.amazon.com/dp/B08J4QQJ3K)
+
+[Amazon.com : cheese](https://www.amazon.com/dp/B08J4QQJ3K)
+
+[Amazon: Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)
+
+
+[Amazon: Mexican Style Previously Happy Belly Packaging - Dp](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B08J4QQJ3K?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-1)
+
+
+
 # TODOs
 * [ ] p1 - additional modifier key to control leading `* ` in markdown list output
 
-# IDEAS
 
-* let's update this script so that if the url contains `amazon.com`, then always remove `Amazon.com: ` from the computed title
+
+
+
 
 
 

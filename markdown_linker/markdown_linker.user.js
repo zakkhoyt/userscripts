@@ -150,7 +150,7 @@
     // Alt+Z title preference options (first element is default)
     const ALT_Z_TITLE_PREF_KEY = 'markdown_linker.altz_title_source';
     const ALT_Z_TITLE_OPTIONS = [
-        { id: 'url-forward', label: 'URL (front)' },
+        { id: 'url-forward', label: 'URL (forward)' },
         { id: 'url-reverse', label: 'URL (reverse)' },
         { id: 'anchor', label: 'Anchor text' },
         { id: 'page', label: 'Page title' }
@@ -1586,11 +1586,36 @@
         
         // meta.content is string if meta exists, ternary converts to null if meta is null
         // Type: string | null
-        const description = meta ? meta.content.trim() : null;
+        let description = meta ? meta.content.trim() : null;
+        if (description) {
+            const normalizedDescription = normalizeTitleForUrl(description, window.location.href);
+            if (normalizedDescription && normalizedDescription !== description) {
+                log(`Normalized meta description for current URL: "${normalizedDescription}"`);
+            }
+            description = normalizedDescription || description;
+        }
         
         log(`Did get meta description: ${description ? `"${description}"` : 'null'}`);
         logFunctionEnd('getMetaDescription');
         return description;
+    }
+
+    /**
+     * Determines whether a hostname belongs to Amazon (any TLD)
+     * @param {string|null} hostname - Hostname portion of URL
+     * @returns {boolean} True when hostname contains amazon.*
+     */
+    function isAmazonHostname(hostname) {
+        logFunctionBegin('isAmazonHostname');
+        if (!hostname) {
+            log('Hostname missing for Amazon detection');
+            logFunctionEnd('isAmazonHostname');
+            return false;
+        }
+
+        const result = hostname.toLowerCase().includes('amazon.');
+        logFunctionEnd('isAmazonHostname');
+        return result;
     }
 
     /**
@@ -1608,8 +1633,8 @@
 
         try {
             const parsedUrl = new URL(url, window.location.href);
-            const hostname = (parsedUrl.hostname || '').toLowerCase();
-            if (!hostname.includes('amazon.')) {
+            const hostname = parsedUrl.hostname || '';
+            if (!isAmazonHostname(hostname)) {
                 log('Hostname not Amazon, skipping detection');
                 logFunctionEnd('isAmazonProductUrl');
                 return false;
@@ -1641,7 +1666,16 @@
             return title;
         }
 
-        if (isAmazonProductUrl(url)) {
+        let parsedUrl;
+        try {
+            parsedUrl = new URL(url, window.location.href);
+        } catch (error) {
+            logWarn(`Failed to parse URL for normalization: ${error.message}`);
+            logFunctionEnd('normalizeTitleForUrl');
+            return title;
+        }
+
+        if (isAmazonHostname(parsedUrl.hostname || '')) {
             const stripped = title.replace(/^Amazon\.com:\s*/i, '').trim();
             if (stripped && stripped !== title) {
                 log(`Stripped Amazon.com prefix from title: "${stripped}"`);
@@ -1668,6 +1702,13 @@
             log('Segment empty, returning empty string');
             logFunctionEnd('formatPathSegment');
             return '';
+        }
+
+        const uppercaseCandidate = segment.toUpperCase();
+        if (/^[A-Z0-9]{10}$/.test(uppercaseCandidate)) {
+            log(`Segment appears to be ASIN, preserving formatting: "${uppercaseCandidate}"`);
+            logFunctionEnd('formatPathSegment');
+            return uppercaseCandidate;
         }
 
         const noExtension = segment.replace(/\.[a-z0-9]+$/i, '');
@@ -1766,7 +1807,9 @@
         try {
             const direction = options.direction === 'reverse' ? 'reverse' : 'forward';
             const urlObj = new URL(url);
-            const domainTitle = getDomainTitleFromHostname(urlObj.hostname) || urlObj.hostname;
+            const hostname = urlObj.hostname || '';
+            const isAmazonHost = isAmazonHostname(hostname);
+            const domainTitle = getDomainTitleFromHostname(hostname) || hostname;
             const pathSegments = urlObj.pathname.split('/').filter(Boolean);
             const meaningfulSegments = pathSegments
                 .filter((segment) => segment && segment !== '.' && segment !== '..')
@@ -1778,6 +1821,22 @@
                 orderedSegments = meaningfulSegments.slice(-2).reverse();
             } else {
                 orderedSegments = meaningfulSegments.slice(0, 2);
+            }
+
+            if (isAmazonHost) {
+                const amazonSegments = orderedSegments.filter(Boolean);
+                let amazonTitle;
+                if (amazonSegments.length >= 2) {
+                    amazonTitle = `${amazonSegments[0]} - ${amazonSegments[1]}`;
+                } else if (amazonSegments.length === 1) {
+                    amazonTitle = amazonSegments[0];
+                } else {
+                    const asinMatch = urlObj.pathname.match(/([A-Z0-9]{10})/);
+                    amazonTitle = asinMatch ? asinMatch[1].toUpperCase() : 'Product Page';
+                }
+                log(`Generated Amazon URL component title: "${amazonTitle}"`);
+                logFunctionEnd('getUrlComponentTitle');
+                return amazonTitle;
             }
 
             let finalTitle = domainTitle;
@@ -1932,9 +1991,10 @@
             const sourceId = sourceOrder[i];
             const title = getTitleFromSource(sourceId, anchor, url);
             if (title) {
-                log(`Selected "${title}" from source ${sourceId} (priority ${i + 1})`);
+                const normalizedTitle = normalizeTitleForUrl(title, url) || title;
+                log(`Selected "${normalizedTitle}" from source ${sourceId} (priority ${i + 1})`);
                 logFunctionEnd('getAutoInferredTitle');
-                return title;
+                return normalizedTitle;
             }
             log(`Source ${sourceId} produced no title`);
         }
@@ -1960,10 +2020,12 @@
         if (resolvedUrl !== url) {
             log(`Sanitized auto-infer URL: "${resolvedUrl}"`);
         }
+
+        const titleSourceUrl = url || resolvedUrl;
         
         // Get the auto-inferred title using priority logic
         log('Will get auto-inferred title');
-        const title = getAutoInferredTitle(anchor, resolvedUrl);
+        const title = getAutoInferredTitle(anchor, titleSourceUrl);
         
         if (!title) {
             log('Auto-infer failed - no title source available');
@@ -2027,7 +2089,8 @@
                 log(`Sanitized buffered URL: "${resolvedUrl}"`);
             }
 
-            const title = getAutoInferredTitle(item.anchor, resolvedUrl);
+            const titleSourceUrl = item.url || resolvedUrl;
+            const title = getAutoInferredTitle(item.anchor, titleSourceUrl);
             if (!title) {
                 try {
                     const url = new URL(resolvedUrl);
@@ -2109,10 +2172,12 @@
     function createMarkdown(title, url) {
         logFunctionBegin('createMarkdown');
         log(`Will create markdown with title: "${title}", url: "${url}"`);
+        const normalizedTitle = normalizeTitleForUrl(title, url);
+        const finalTitle = normalizedTitle || title;
         
         // Template literal creates string with embedded title and url values
         // Type: string
-        const markdown = `[${title}](${url})`;
+        const markdown = `[${finalTitle}](${url})`;
         
         log(`Did create markdown: "${markdown}"`);
         logFunctionEnd('createMarkdown');
@@ -2199,7 +2264,7 @@
             const text = getLinkText(anchor) || cleanedUrl;
             
             // Create markdown link
-            const markdown = `[${text}](${cleanedUrl})`;
+            const markdown = createMarkdown(text, cleanedUrl);
             markdownLinks.push(markdown);
             log(`Added link ${index}: ${markdown}`);
         });
@@ -2251,7 +2316,7 @@
             const text = getLinkText(anchor) || cleanedUrl;
             
             // Create markdown link with indentation
-            const markdown = `${indent}- [${text}](${cleanedUrl})`;
+            const markdown = `${indent}- ${createMarkdown(text, cleanedUrl)}`;
             markdownLinks.push(markdown);
             log(`Added link ${index} at depth ${depth}: ${markdown}`);
         });
