@@ -19,6 +19,25 @@
 
 'use strict';
 
+const MAX_AMAZON_REDIRECT_DEPTH = 3;
+const AMAZON_REDIRECT_PATTERNS = [
+    {
+        matches: (pathname) => pathname.startsWith('/sspa/click'),
+        paramKeys: ['url'],
+        reason: 'sponsored-click'
+    },
+    {
+        matches: (pathname) => pathname.startsWith('/gp/slredirect'),
+        paramKeys: ['url'],
+        reason: 'slredirect'
+    },
+    {
+        matches: (pathname) => pathname.startsWith('/aclk'),
+        paramKeys: ['url', 'u'],
+        reason: 'ad-click'
+    }
+];
+
 /**
  * Parses an Amazon URL string into a structured data object
  * 
@@ -50,15 +69,48 @@ function parseAmazonURL(urlString) {
         return null;
     }
 
+    return parseAmazonURLInternal(urlString, {
+        depth: 0,
+        rootOriginal: urlString,
+        redirectChain: []
+    });
+}
+
+function parseAmazonURLInternal(urlString, state) {
+    if (state.depth > MAX_AMAZON_REDIRECT_DEPTH) {
+        logWarn('Reached maximum Amazon redirect depth, aborting parse');
+        return null;
+    }
+
     try {
         const urlObj = new URL(urlString);
-        
-        // Verify it's an Amazon URL
+
         if (!isAmazonURL(urlObj)) {
             return null;
         }
 
-        // Determine URL type and extract relevant data
+        const redirectTarget = resolveAmazonRedirect(urlObj);
+        if (redirectTarget) {
+            const redirectEntry = {
+                wrapper: redirectTarget.wrapper,
+                reason: redirectTarget.reason,
+                param: redirectTarget.param
+            };
+            const nested = parseAmazonURLInternal(redirectTarget.target, {
+                depth: state.depth + 1,
+                rootOriginal: state.rootOriginal,
+                redirectChain: state.redirectChain.concat(redirectEntry)
+            });
+            if (nested) {
+                const chain = nested.redirectChain || state.redirectChain.concat(redirectEntry);
+                nested.redirectChain = chain;
+                nested.url = nested.url || {};
+                nested.url.original = state.rootOriginal;
+                nested.url.redirectChain = chain;
+                return nested;
+            }
+        }
+
         const type = determineURLType(urlObj);
         const asin = extractASINFromURL(urlObj);
         const storeId = extractStoreIDFromURL(urlObj);
@@ -66,24 +118,27 @@ function parseAmazonURL(urlString) {
         const queryParams = parseQueryParams(urlObj);
         const variantParams = extractVariantParams(queryParams);
         const trackingParams = extractTrackingParams(queryParams);
-
-        // Build clean URL
-        const cleanUrl = buildCleanURL(urlObj, variantParams);
+        const canonicalPath = normalizeAmazonPath(urlObj.pathname, { asin, type });
+        const cleanUrl = buildCleanURL(urlObj, variantParams, { canonicalPath });
+        const redirectChain = (state.redirectChain || []).slice();
 
         return {
             type,
             asin,
             storeId,
             sellerId,
+            redirectChain,
             url: {
-                original: urlString,
+                original: state.rootOriginal,
                 clean: cleanUrl,
                 protocol: urlObj.protocol,
                 hostname: urlObj.hostname,
                 pathname: urlObj.pathname,
+                canonicalPath,
                 queryParams,
                 variantParams,
-                trackingParams
+                trackingParams,
+                redirectChain
             }
         };
     } catch (error) {
@@ -346,8 +401,9 @@ function extractTrackingParams(queryParams) {
  * @param {Object} [variantParams={}] - Variant parameters to include
  * @returns {string} Clean URL
  */
-function buildCleanURL(urlObj, variantParams = {}) {
-    let cleanUrl = `${urlObj.protocol}//${urlObj.hostname}${urlObj.pathname}`;
+function buildCleanURL(urlObj, variantParams = {}, options = {}) {
+    const canonicalPath = options.canonicalPath || urlObj.pathname;
+    let cleanUrl = `${urlObj.protocol}//${urlObj.hostname}${canonicalPath}`;
     
     // Add variant parameters if any
     const paramKeys = Object.keys(variantParams);
@@ -359,6 +415,33 @@ function buildCleanURL(urlObj, variantParams = {}) {
     }
     
     return cleanUrl;
+}
+
+function normalizeAmazonPath(pathname = '/', context = {}) {
+    if (!pathname) {
+        return '/';
+    }
+
+    if (context.type === 'product' && context.asin) {
+        return `/dp/${context.asin}`;
+    }
+
+    const asinPatterns = [
+        /\/dp\/([A-Z0-9]{10})/i,
+        /\/gp\/product\/([A-Z0-9]{10})/i,
+        /\/o\/ASIN\/([A-Z0-9]{10})/i,
+        /\/exec\/obidos\/ASIN\/([A-Z0-9]{10})/i,
+        /\/gp\/aw\/d\/([A-Z0-9]{10})/i
+    ];
+
+    for (const pattern of asinPatterns) {
+        const match = pathname.match(pattern);
+        if (match) {
+            return `/dp/${match[1].toUpperCase()}`;
+        }
+    }
+
+    return pathname;
 }
 
 /**
@@ -431,6 +514,77 @@ function extractAmazonAnchorsFromDOM(context = document) {
     return parsed;
 }
 
+function resolveAmazonRedirect(urlObj) {
+    const pathname = (urlObj.pathname || '').toLowerCase();
+    for (const pattern of AMAZON_REDIRECT_PATTERNS) {
+        if (!pattern.matches(pathname)) {
+            continue;
+        }
+
+        for (const key of pattern.paramKeys) {
+            if (!urlObj.searchParams.has(key)) {
+                continue;
+            }
+
+            const rawTarget = urlObj.searchParams.get(key);
+            if (!rawTarget) {
+                continue;
+            }
+
+            const decodedTarget = safeDecodeURIComponent(rawTarget);
+            const absoluteTarget = buildAbsoluteAmazonURL(decodedTarget, urlObj);
+            if (absoluteTarget) {
+                return {
+                    target: absoluteTarget,
+                    wrapper: urlObj.href,
+                    reason: pattern.reason,
+                    param: key
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
+function safeDecodeURIComponent(value) {
+    try {
+        return decodeURIComponent(value);
+    } catch (error) {
+        return value;
+    }
+}
+
+function buildAbsoluteAmazonURL(target, baseUrlObj) {
+    if (!target) {
+        return null;
+    }
+
+    let candidate = target.trim();
+    if (!candidate) {
+        return null;
+    }
+
+    if (candidate.startsWith('//')) {
+        candidate = `${baseUrlObj.protocol}${candidate}`;
+    } else if (candidate.startsWith('/')) {
+        candidate = `${baseUrlObj.protocol}//${baseUrlObj.hostname}${candidate}`;
+    } else if (!/^https?:/i.test(candidate)) {
+        candidate = `${baseUrlObj.protocol}//${candidate}`;
+    }
+
+    try {
+        const result = new URL(candidate);
+        if (isAmazonURL(result)) {
+            return result.href;
+        }
+    } catch (error) {
+        return null;
+    }
+
+    return null;
+}
+
 // Placeholder functions - these would be imported from helpers
 function isAmazonURL(urlObj) {
     const amazonDomainPattern = /^(www\.)?amazon\.(com|co\.uk|de|fr|es|it|ca|co\.jp|in|cn|com\.mx|com\.br|com\.au|nl|se|com\.tr|sg|ae|sa)$/i;
@@ -450,6 +604,7 @@ function safeQuery(selector, context) { /* Implementation in dom_helpers.js */ r
 function safeQueryAll(selector, context) { /* Implementation in dom_helpers.js */ return []; }
 function safeText(element) { /* Implementation in dom_helpers.js */ return null; }
 function safeAttr(element, attr) { /* Implementation in dom_helpers.js */ return null; }
+function logWarn(...args) { /* Implementation in logging_helpers.js */ }
 function logError(...args) { /* Implementation in logging_helpers.js */ }
 
 const LinkParser = {

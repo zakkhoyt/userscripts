@@ -15,6 +15,25 @@
 
 'use strict';
 
+const MAX_CLEANER_REDIRECT_DEPTH = 3;
+const AMAZON_REDIRECT_PATTERNS = [
+    {
+        matches: (pathname) => pathname.startsWith('/sspa/click'),
+        paramKeys: ['url'],
+        reason: 'sponsored-click'
+    },
+    {
+        matches: (pathname) => pathname.startsWith('/gp/slredirect'),
+        paramKeys: ['url'],
+        reason: 'slredirect'
+    },
+    {
+        matches: (pathname) => pathname.startsWith('/aclk'),
+        paramKeys: ['url', 'u'],
+        reason: 'ad-click'
+    }
+];
+
 /**
  * Cleans an Amazon URL by removing tracking parameters
  * 
@@ -32,35 +51,47 @@
  * // Returns: 'https://amazon.com/dp/B08N5WRWNW'
  */
 function cleanAmazonURL(urlString, options = {}) {
+    return cleanAmazonURLInternal(urlString, options, 0);
+}
+
+function cleanAmazonURLInternal(urlString, options, depth) {
     const { preserveVariants = true, preserveSeller = false } = options;
+
+    if (depth > MAX_CLEANER_REDIRECT_DEPTH) {
+        logWarn('Reached maximum Amazon redirect depth while cleaning URL');
+        return urlString;
+    }
 
     try {
         const urlObj = new URL(urlString);
-        
-        // Build clean URL with base path
-        let cleanUrl = `${urlObj.protocol}//${urlObj.hostname}${urlObj.pathname}`;
-        
-        // Add back variant parameters if requested
+        const redirectTarget = resolveAmazonRedirect(urlObj);
+        if (redirectTarget) {
+            return cleanAmazonURLInternal(redirectTarget, options, depth + 1);
+        }
+
+        const canonicalPath = normalizeAmazonPath(urlObj.pathname);
+        let cleanUrl = `${urlObj.protocol}//${urlObj.hostname}${canonicalPath}`;
+
         if (preserveVariants || preserveSeller) {
             const paramsToKeep = [];
-            
+
             if (preserveVariants) {
                 const th = urlObj.searchParams.get('th');
                 const psc = urlObj.searchParams.get('psc');
                 if (th) paramsToKeep.push(`th=${th}`);
                 if (psc) paramsToKeep.push(`psc=${psc}`);
             }
-            
+
             if (preserveSeller) {
                 const smid = urlObj.searchParams.get('smid');
                 if (smid) paramsToKeep.push(`smid=${smid}`);
             }
-            
+
             if (paramsToKeep.length > 0) {
                 cleanUrl += '?' + paramsToKeep.join('&');
             }
         }
-        
+
         return cleanUrl;
     } catch (error) {
         logError('Failed to clean URL:', error);
@@ -150,19 +181,17 @@ function cleanProductTitle(title) {
     
     let cleaned = title.trim();
     
-    // Remove "Amazon.com:" prefix
     cleaned = cleaned.replace(/^Amazon\.(com|co\.uk|de|fr|es|it|ca|co\.jp|in|cn|com\.mx|com\.br|com\.au|nl|se|com\.tr|sg|ae|sa)\s*:\s*/i, '');
-    
-    // Remove "at Amazon.*" suffix
     cleaned = cleaned.replace(/\s+at\s+Amazon\.(com|co\.uk|de|fr|es|it|ca|co\.jp|in|cn|com\.mx|com\.br|com\.au|nl|se|com\.tr|sg|ae|sa)\s*$/i, '');
-    
-    // Remove category after " : "
+    cleaned = cleaned.replace(/\s+at\s+Amazon[^:]*store$/i, '');
+    cleaned = cleaned.replace(/^Amazon\s+Grocery,\s*/i, '');
+    cleaned = cleaned.replace(/\s+-\s*Dp$/i, '');
+
     const colonIndex = cleaned.indexOf(' : ');
     if (colonIndex > 0) {
         cleaned = cleaned.substring(0, colonIndex);
     }
     
-    // Remove excessive whitespace
     cleaned = cleaned.replace(/\s+/g, ' ');
     
     return cleaned.trim();
@@ -236,6 +265,102 @@ function normalizeAmazonHostname(hostname, preferredDomain = 'com') {
     
     // Otherwise return original with www
     return hostname.startsWith('www.') ? hostname : `www.${hostname}`;
+}
+
+function normalizeAmazonPath(pathname = '/') {
+    if (!pathname) {
+        return '/';
+    }
+
+    const asinPatterns = [
+        /\/dp\/([A-Z0-9]{10})/i,
+        /\/gp\/product\/([A-Z0-9]{10})/i,
+        /\/o\/ASIN\/([A-Z0-9]{10})/i,
+        /\/exec\/obidos\/ASIN\/([A-Z0-9]{10})/i,
+        /\/gp\/aw\/d\/([A-Z0-9]{10})/i
+    ];
+
+    for (const pattern of asinPatterns) {
+        const match = pathname.match(pattern);
+        if (match) {
+            return `/dp/${match[1].toUpperCase()}`;
+        }
+    }
+
+    return pathname;
+}
+
+function resolveAmazonRedirect(urlObj) {
+    const pathname = (urlObj.pathname || '').toLowerCase();
+    for (const pattern of AMAZON_REDIRECT_PATTERNS) {
+        if (!pattern.matches(pathname)) {
+            continue;
+        }
+
+        for (const key of pattern.paramKeys) {
+            if (!urlObj.searchParams.has(key)) {
+                continue;
+            }
+
+            const rawTarget = urlObj.searchParams.get(key);
+            if (!rawTarget) {
+                continue;
+            }
+
+            const decodedTarget = safeDecodeURIComponent(rawTarget);
+            const absoluteTarget = buildAbsoluteAmazonURL(decodedTarget, urlObj);
+            if (absoluteTarget) {
+                return absoluteTarget;
+            }
+        }
+    }
+
+    return null;
+}
+
+function safeDecodeURIComponent(value) {
+    try {
+        return decodeURIComponent(value);
+    } catch (error) {
+        return value;
+    }
+}
+
+function buildAbsoluteAmazonURL(target, baseUrlObj) {
+    if (!target) {
+        return null;
+    }
+
+    let candidate = target.trim();
+    if (!candidate) {
+        return null;
+    }
+
+    if (candidate.startsWith('//')) {
+        candidate = `${baseUrlObj.protocol}${candidate}`;
+    } else if (candidate.startsWith('/')) {
+        candidate = `${baseUrlObj.protocol}//${baseUrlObj.hostname}${candidate}`;
+    } else if (!/^https?:/i.test(candidate)) {
+        candidate = `${baseUrlObj.protocol}//${candidate}`;
+    }
+
+    try {
+        const result = new URL(candidate);
+        if (isAmazonHostname(result.hostname)) {
+            return result.href;
+        }
+    } catch (error) {
+        return null;
+    }
+
+    return null;
+}
+
+function isAmazonHostname(hostname) {
+    if (!hostname) {
+        return false;
+    }
+    return hostname.toLowerCase().includes('amazon.');
 }
 
 // Placeholder functions

@@ -51,24 +51,18 @@
 
 
 * It seems to work, however I noticed a few things. The attached image is a screenshot of the popup menu
-  * [ ] The `Page Title` entry contains `Amazon.com: ` which it should not
-  * [ ] Both `URL (forward)` and `URL (reverse)` contain the word `Click`
+  * [X] ~~The `Page Title` entry contains ![amazon](../docs/images/icons/amazon.png) `Amazon.com` prefixes which it should not~~ [2026-01-16]
+  * [X] ~~Both `URL (forward)` and `URL (reverse)` contain the word `Click`~~ [2026-01-16]
     * This seems to be because I'm opt+clicking on product links from an amazon search result. The script is doing what it should. 
       * [Sspa - Click](https://www.amazon.com/sspa/click?ie=UTF8&spc=MTo4NDMxMzE2NzI3OTkzNTQ0OjE3Njg1NTE4OTQ6c3BfYXRmOjMwMDMzNzY5MTk2NzYwMjo6MDo6&url=%2FORGANIC-VALLEY%25C2%25AE-Cheddar-Shredded-Favorites%2Fdp%2FB0CTPML3NM%2Fref%3Dsr_1_1_us_f3_0o_wf_sspa%3Fcrid%3D3IQZAAPYR2W7D%26dib%3DeyJ2IjoiMSJ9.RmKs221QSC8FWBU71iLzAQWkHZf2724fwJhddD_DrHNTGQdQ5nyUrzseLWNp5cmfCu4Z3JcRY8D2rmAfjy-RcVndDdN3VrK16s5WPrpiHCsjF7UnI4oK32K6eQIMonSihYHYM0JKrKgL41vlKCEB-v9YceJoKMvjnVxfxElJolimq2ZCmaEgquJjYCxA8cpj6q-GjQ-oo_1IFUymuTgdf59wu5pj2n9v7A6NMj1bzy3407PFcAGMSRxhUkzvGO53NmYoZLKITWcNp8wCPw_E_M_BVEw4NMvv_q2Mv_PJVW4.y3OsBcpt4uKcmMw_P2QB1iIR79WE4DNzgRRETWafwQQ%26dib_tag%3Dse%26keywords%3Dcheese%26qid%3D1768551894%26sprefix%3Dchee%252Caps%252C242%26sr%3D8-1-spons%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9hdGY%26psc%3D1)
     * more on this after the amazon_toolkit refactor is complete. 
   * On another test click (opt+click on a product pages background) 
-    * Issue with `title`: product the `URL (forward)` contains some URL encoded text EX: `%c2`.  
+    * [X] ~~Issue with `title`: product the `URL (forward)` contains some URL encoded text EX: `%c2`~~  [2026-01-16]
       * Expected title: [Organic Valley® Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
       * Actual title: [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-    * Issue with the `url`: this is not a cleand up / short amazon product link
-      * 
-      
-
-
-
-
-
-<!-- * [ ] For `amazon product` and `amazon shop/store` urls, let's delete some additional phrases and regexes from the composed title -->
+    * [X] ~~Issue with the `url`: this is not a cleaned up / short ![amazon](../docs/images/icons/amazon.png) `Amazon` product link. The path has the description in it still, and there are unwanted query params.~~ [2026-01-16]
+      * Expected url: [Organic Valley® Cheddar Shredded Favorites - Dp](https://www.amazon.com/dp/B0CTPML3NM?)
+      * Actual url: [Organic Valley® Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
 * Now that we have access to the amazon_toolkit, we can categorize amazon links and maybe we can translate to other kinds of links types too. 
   * EX: If I go to amazon.com then type  somethign in the search bar, it will show me a list of products. 
     * when I click on these, amazon_toolkit should be able to tell us if the link is a product link, a store link, etc...
@@ -77,10 +71,11 @@
         * https://www.amazon.com/sspa/click?ie=UTF8&spc=MTo4NDMxMzE2NzI3OTkzNTQ0OjE3Njg1NTE4OTQ6c3BfYXRmOjMwMDMzNzY5MTk2NzYwMjo6MDo6&url=%2FORGANIC-VALLEY%25C2%25AE-Cheddar-Shredded-Favorites%2Fdp%2FB0CTPML3NM%2Fref%3Dsr_1_1_us_f3_0o_wf_sspa%3Fcrid%3D3IQZAAPYR2W7D%26dib%3DeyJ2IjoiMSJ9.RmKs221QSC8FWBU71iLzAQWkHZf2724fwJhddD_DrHNTGQdQ5nyUrzseLWNp5cmfCu4Z3JcRY8D2rmAfjy-RcVndDdN3VrK16s5WPrpiHCsjF7UnI4oK32K6eQIMonSihYHYM0JKrKgL41vlKCEB-v9YceJoKMvjnVxfxElJolimq2ZCmaEgquJjYCxA8cpj6q-GjQ-oo_1IFUymuTgdf59wu5pj2n9v7A6NMj1bzy3407PFcAGMSRxhUkzvGO53NmYoZLKITWcNp8wCPw_E_M_BVEw4NMvv_q2Mv_PJVW4.y3OsBcpt4uKcmMw_P2QB1iIR79WE4DNzgRRETWafwQQ%26dib_tag%3Dse%26keywords%3Dcheese%26qid%3D1768551894%26sprefix%3Dchee%252Caps%252C242%26sr%3D8-1-spons%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9hdGY%26psc%3D1
         * This is not directly what I would consider to be a product link, but it does contain the information needed to create one (the `url` query param contains  `dp` / and `asin` as well as the url description of the product)
         * if I click on that link it takes me here: https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1
-* [ ] Update the script to classify an amazon link. 
-* [ ] When the script receives a `amazon.com` based link, and that link is classified as a `product` then I want to do some more refining
-  * Do this no matter which menu entry was clicked on, no matter how the script was invoked.
-  * Compute the markdown link title and url like normal, but before those are composed into a markdown link, lets do some further conditioning:
+* [X] ~~Update the script to classify an ![amazon](../docs/images/icons/amazon.png) `Amazon` link. Make sure this is clear in the logs~~ [2026-01-16]
+* [X] ~~Transforming `Amazon Product` URLs~~ [2026-01-16]
+  * When the script receives a `amazon.com` based link, and that link is classified as a `product` then I want to do some more refining
+  * [X] ~~Do this no matter which menu entry was clicked on, no matter how the script was invoked.~~ [2026-01-16]
+    * Compute the markdown link title and url like normal, but before those are composed into a markdown link, lets do some further conditioning:
       * In the title I want to remove these text blurbs. NOTE: I believe that the script or amazon_toolkit might already have code to handle some of these, thoguh I'm not sure it's doing so how/when I described above. Also nto sure it's covering all of these cases yet
         * ` at Amazon Women’s Clothing store`
         * ` at Amazon Men’s Clothing store`
@@ -94,14 +89,92 @@
         * regex: `s/(Amazon Grocery, )(.*)/$1/g`
         * regex: `s/(*.)( - Dp)/$1/g`
         * replace them with `""`
+      * [X] ~~research the current script to see if it is handling any of these cases, where and when it's doing so. If it doesn't align with what i described above, then let's discuss.~~ [2026-01-16]
+* That was a longer list. Please summarize what you are taking away before doing anything
+
+
+
+* A few meta notes. 
+  * [X] ~~*I noticed you stopped checking off `[ ]` items in `markdown_linker/markdown_linker.user.md`.*~~ [2026-01-16]
+    * Update this frequently
+  * [X] ~~*it seems you arent updating `markdown_linker/docs/INTEGRATE_AMAZON_TOOLKIT.md` very frequently at all.*~~ [2026-01-16]
+    * Update this frequently, even with what the current problem is. 
+    * Also be sure to mark thigns off in this doc or delete them
+
+* okay the menu is back but still the logs are full of "amazon unavailabel" 
+* [ ] Is this maybe a false flag? Could the extension get this far without the library at this point? I though you removed the fallback legacy stuff. New logs at `markdown_linker/.gitignored/logs_amazon_product.log` It say things like:
+```log
+03:01:52.858 markdown_linker: Amazon toolkit unavailable Markdown Linker.user.js:171:21
+03:01:52.858 markdown_linker: end getAmazonToolkit Markdown Linker.user.js:209:21
+```
+* but then goes on to do things like
+```log
+03:01:52.858 markdown_linker: Normalized Amazon title: "ORGANIC VALLEY® Spicy Cheddar Shredded Cheese, Flavor Favorites, 6 oz : Grocery & Gourmet Food" Markdown Linker.user.js:171:21
+03:01:52.858 markdown_linker: end normalizeTitleForUrl Markdown Linker.user.js:209:21
+03:01:52.858 
+```
+* [ ] Let' talk about these logs. Currently every line logged from the execution of that userscript shows a previx of   `markdown_linker: `
+  * [ ] This is great, but I'd like additional prefix when lines are logged from the `amazon_toolkit`. Something like: `markdown_linker: [amazon_toolkit]`. 
+    * [ ] Hold this though, maybe we will currently get logs like what I describe if the `amazon_toolkit unvailable` logs are to be believed. 
+* Every log line generated from the user.js is suffixed with `Markdown Linker.user.js:$line:$col`
+  * [ ] why is it calling this script `Markdown Linker.user.js`? The name is snake case `markdown_linker.user.js`. Fix this
+* I noticed that in `amazon_toolkit`, that that code writes logs, but something here gives me pause
+  * EX: in `common/amazon_toolkit/links/link_parser.js`:  `function logWarn(...args) { /* Implementation in logging_helpers.js */ }`
+    * `logging_helpers.js` is NOT part of this toolkit, rather it's in `userscript_common/logging_helpers.js`. While this is better than it being part of ther `user.js`, this library needs to function from node consumers, and other userscript consumers. 
+      * [ ] Move all of `userscript_common/*` to somwhere under `common`. 
+        * [ ] Ensure this is a valid thing to do before hand. 
+        * [ ] Shoudl those files be re-written to follow the same convention as the other files in that dir? Or can/shoudl we keep as is?
+
+
+
+* On product page
+  * [ ] every one of these stil has a bloated (unshortened) url
+  * opt+z+click on BG: [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
+  * page title: [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
+  * url (f): [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
+  * url (r): [B0CTPML3NM - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
+  * meta: [ORGANIC VALLEY® Spicy Cheddar Shredded Cheese, Flavor Favorites, 6 oz : Grocery & Gourmet Food](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
+* I saved browser logs when making the popup menu present at: `markdown_linker/.gitignored/logs_amazon_product.log`. Relevant logs begin around `02:38:06.664`
+  * [ ] I noticed things that suggest the toolkit libs aren't working:
+    * `02:28:32.738 markdown_linker: YouTube toolkit unavailable Markdown Linker.user.js:169:21`
+    * `02:38:09.754 markdown_linker: Amazon toolkit unavailable Markdown Linker.user.js:169:21`
+      * [ ] Why aren't these being logged at `warnign` or even `error`?
+      * [ ] Why are we falling into this condition?
+  * [ ] why do the log lines call this script `Markdown Linker.user.js`, not `markdown_linker.user.js`? Fix this
+
+* [ ] When opt+clicking on the background of an amazon product (`https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1`), I'm still seeing some things that I believe should be changed by now?
+  * Trailing `- Dp` is still present in the `title` (but the hexchars seem to be resolved) See attached image
+  * [ ] let's add another title substring removal `s/(.*)( ?: Grocery & Gourmet Food)/$1/g`
 
 
 
 
+
+
+
+
+* [ ] add a new link formatting style (along with `page title`, `url (forward)`, etc,) which will be titled "domain specific"
+  * set this part of the code up so that in the future we can add new domains and rules to it. 
+    * consider reading in a json document that can define these things. We would need to define a schema (discuss back and forth)
+
+
+
+
+* Documentation and Tests: I'm not a java programmer (but am a zsh programmer, iOS programmer) 
+  * [ ] User facing documentation. I'm not familiar with how to surface SDK documentation in either:
+    * A java-script library like `amazon_toolkit` 
+      * The ai instructions i set up in this repo are very heavy handed on javascript comments, but not SDK doc systems. 
+        * perhpas there's a tool that will compile those exisitng comments into docs? That's a step formwared, but we are still mising usage examples, table of contents, that kind of stuff
+    * With `*.user.js` files
+  * [ ] Adding unit tests and using them to drive development and refactors
+    * Test for java-script library like `amazon_toolkit` 
+    * Test for `*.user.js` files. 
+      * Is it possible to feed input to these files to mimick what happens in the browser? I guess in a lot of cases we'll need to lean on the browser for things, but not all
+        * Does it make sense to pull more logic out of the userscript and into libraries? (make more libs/test?)
 
 * [ ] When using opt+z+click, when the popup shows "Copied N links to clipboard", I'd like it to add a second line of text there which indicates which preference mode was used. 
 
-* [ ] amazon products - [storename - product descriptoin](short product url)
+
 
 
 

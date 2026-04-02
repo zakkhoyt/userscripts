@@ -5,53 +5,15 @@
 - Capture a phased plan (with validation checkpoints) before migrating runtime logic so we can discuss scope and testing expectations up front.
 
 ## Status (2026-01-16)
+- Introduced a lightweight module registry so every toolkit file now registers itself under `window.__AmazonToolkitModules[...]` when loaded in the browser while still exporting via CommonJS for Node. This lets ![amazon](docs/images/icons/amazon.png) `Amazon` userscripts pull shared modules without bundling yet.
+- Rebuilt `common/amazon_toolkit/index.js` to auto-load helpers/extractors/link utilities/markdown generators from real modules (or registry fallbacks) and expose the same API surface as before, so ViolentMonkey can `@require` the entrypoint or the individual modules interchangeably.
+- Documented this bootstrap step here so the remaining integration phases (URL parser adoption, toolkit markdown in Alt+Z, etc.) can assume a single source of truth for toolkit exports.
+- `markdown_linker/markdown_linker.user.js` now delegates ![amazon](docs/images/icons/amazon.png) `Amazon` anchor parsing and URL cleaning to the shared toolkit (`parseAmazonAnchor()`, `cleanAmazonURL()`) without any legacy heuristics, so <kbd>Alt</kbd> + <kbd>Z</kbd> clipboard flows preserve variant parameters without duplicating logic.
+- The shared link parser/cleaner now unwraps `/sspa/click`, `/gp/slredirect`, and `/aclk` wrappers, canonicalizes `/dp/{ASIN}` paths, and surfaces redirect chains; the userscript caches that metadata so logs print `type`, `asin`, and redirect counts for each ![amazon](docs/images/icons/amazon.png) `Amazon` action.
+- `cleanUrl()` pulls the canonical toolkit URL (variants preserved) for anchors and background clicks alike, so URL-component titles no longer surface "Sspa - Click" or slug-encoded strings.
+- `normalizeTitleForUrl()` calls `AmazonToolkit.Links.cleanProductTitle()` + `AmazonToolkit.Markdown.formatTitle()` to strip suffixes such as `at Amazon Women’s Clothing store`, `Amazon Grocery,`, and `- Dp` across every menu entry.
 
-### ✅ Completed Integration
-- Module registry established: toolkit files register under `window.__AmazonToolkitModules[...]` (browser) while exporting via CommonJS (Node)
-- `common/amazon_toolkit/index.js` wired to real extractors/helpers/link utils/markdown generators
-- Userscript delegates all ![amazon](docs/images/icons/amazon.png) `Amazon` anchor parsing and URL cleaning to toolkit (`parseAmazonAnchor()`, `cleanAmazonURL()`)
-- Link parser unwraps sponsored redirects (`/sspa/click`, `/gp/slredirect`, `/aclk`), canonicalizes `/dp/{ASIN}` paths
-- Title normalization uses `cleanProductTitle()` + `formatTitle()` to strip suffixes
-- Logs now show `type`, `asin`, redirect counts for each ![amazon](docs/images/icons/amazon.png) `Amazon` action
-
-### 🚧 Current Blockers
-1. **"Amazon toolkit unavailable" false positives in logs**
-   - Toolkit IS loading and working correctly
-   - Warning logs are misleading/incorrect - need to remove or clarify condition
-   - Appears around line 171-172 in [markdown_linker/markdown_linker.user.js](../markdown_linker.user.js)
-
-2. **Bloated URLs still present** (all menu entries)
-   - URLs retain full paths and tracking params despite toolkit integration
-   - Expected: `https://www.amazon.com/dp/B0CTPML3NM`
-   - Actual: `https://www.amazon.com/ORGANIC-VALLEY%C2%AE-.../dp/B0CTPML3NM?crid=...&sprefix=...`
-   - Indicates `cleanAmazonURL()` not being called or not working correctly
-
-3. **URL-encoded characters in titles** (`%c2%ae` not decoded to `®`)
-   - Example: "Organic Valley%c2%ae Cheddar" should be "Organic Valley® Cheddar"
-   - `formatTitle()` needs to handle URL decoding
-
-4. **Trailing `- Dp` still present in some titles**
-   - `cleanProductTitle()` regex may not be matching all cases
-   - Needs investigation of title cleaning pipeline
-
-5. **Additional suffix to remove: ` : Grocery & Gourmet Food`**
-   - New pattern identified, needs adding to `cleanProductTitle()`
-
-6. **`userscript_common/` files need reorganization**
-   - `logging_helpers.js`, `dom_helpers.js` are generic utilities, not Amazon-specific
-   - Should move to `common/userscript_common/` for broader reuse
-   - Need to verify this doesn't break existing imports
-
-### 📋 Next Actions (Priority Order)
-1. Fix "toolkit unavailable" false positive logs
-2. Verify `cleanAmazonURL()` is being called for all menu entries
-3. Add URL decoding to `formatTitle()`
-4. Debug `- Dp` suffix removal
-5. Add `: Grocery & Gourmet Food` to suffix removal list
-6. Reorganize `userscript_common/` files
-7. Maintain frequent documentation updates (this file + [user.md](../markdown_linker.user.md))
-
-## Historical Context (For Reference)
+## Current State Review
 
 ### ![amazon](docs/images/icons/amazon.png) `Amazon` Toolkit highlights
 - `common/amazon_toolkit/extractors/product_extractor.js` already assembles rich product data (ASIN, title, price, variant, images) with fallback chains (JSON-LD → meta → DOM) suitable for both browser and Node contexts.
@@ -59,7 +21,28 @@
 - `common/amazon_toolkit/links/link_cleaner.js` normalizes `/dp/` links, keeps variant params (`th`, `psc`, `smid`) when requested, and strips tracking suffixes.
 - Tests/fixtures (`tests/fixtures/amazon/**`) provide saved HTML that can be fed into the extractors for regression checks without live scraping.
 
-### Gap Analysis
+### Toolkit gaps to address first
+- `common/amazon_toolkit/index.js` exposes empty stub functions; before consumption we need to wire actual module exports (or provide a bundler build) so `AmazonToolkit.extractProductData()` etc. are real.
+- Helper imports (`safeQuery`, logging functions, validators) are referenced but not required anywhere, so the intended shared helpers must either be implemented or explicitly pulled from `userscript_common/**`.
+- Distribution story is undefined: no `@require` bundle, npm package, or build artifact that `markdown_linker.user.js` can load today.
+
+### `markdown_linker/markdown_linker.user.js` ![amazon](docs/images/icons/amazon.png) `Amazon` logic
+- `cleanUrl()` is now a thin shim over `AmazonToolkit.Links.cleanAmazonURL()`, so canonical `/dp/{ASIN}` links (with variants intact) only come from shared code.
+- `extractUrlFromAnchor()` no longer crawls `data-asin` containers; toolkit parsing is the only ![amazon](docs/images/icons/amazon.png) `Amazon` path, making failures obvious in logs.
+- Helpers such as `isAmazonHostname()`, `isAmazonProductUrl()`, `normalizeTitleForUrl()`, and the ![amazon](docs/images/icons/amazon.png) `Amazon` branch inside `getUrlComponentTitle()` add domain knowledge that belongs in the toolkit namespace.
+- Domain-specific formatting currently focuses on ![youtube](docs/images/icons/youtube.png) `YouTube`; ![amazon](docs/images/icons/amazon.png) `Amazon` products still rely on generic `URL (forward/reverse)` heuristics, producing noisy titles.
+
+### Latest Findings (2026-01-16)
+- **URL-component titles still mirror raw path tokens**: `getUrlComponentTitle()` ([markdown_linker/markdown_linker.user.js](markdown_linker/markdown_linker.user.js#L1935-L1991)) blindly reuses the first two sanitized path segments, so even with canonical `/dp/{ASIN}` URLs we should read toolkit classifications (product vs. store) to decide whether to display `Brand: Product` vs. `Store Name`.
+- **Script lacks discoverable usage docs**: ViolentMonkey doesn’t expose `--help`, and today the only reference is the running TODO list in [markdown_linker/markdown_linker.user.md](markdown_linker/markdown_linker.user.md). We should add a lightweight “Capabilities & Shortcuts” doc (or README section) that lists the current gestures, menu entries, and toolkit-backed behaviors so users don’t have to read the source.
+
+### Recent Updates (2026-01-16)
+- Sponsored wrappers are now unwound inside `common/amazon_toolkit/links/link_parser.js` and `link_cleaner.js`, exposing redirect chains that the userscript logs (`redirects=1`, `type=product`, etc.) whenever ![amazon](docs/images/icons/amazon.png) `Amazon` links are processed.
+- `cleanUrl()` now acts as a thin shim over `AmazonToolkit.Links.cleanAmazonURL()`, ensuring every anchor, selection auto-copy, and <kbd>Alt</kbd> + <kbd>Z</kbd> buffer entry receives the canonical `/dp/{ASIN}` URL with `th`/`psc` preserved.
+- Removed the tile `data-asin` fallback plus the manual `/dp/` reconstruction, so toolkit coverage gaps surface via warnings instead of silently succeeding.
+- Title-conditioning uses shared toolkit helpers, so menu entries stop surfacing `Amazon.com:` prefixes, clothing-store suffixes, or trailing `- Dp` regardless of which shortcut generated the markdown.
+
+## Gap Analysis
 
 | Concern                              | Current userscript logic                                                                 | Toolkit capability                                          | Notes                                                                                             |
 | ------------------------------------ | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -70,7 +53,7 @@
 | Domain-specific title overrides      | Only ![youtube](docs/images/icons/youtube.png) `YouTube` handled via `getDomainSpecificTitle` | Product/store extractors + markdown generators              | Feeding extractor output into toolkit markdown generator would yield concise product/store titles. |
 | Data re-use / DRY                    | Userscript duplicates parsing/cleaning even though toolkit modules exist                 | Toolkit modules are written to be reusable                  | Moving logic reduces code size and keeps Amazon fixes in one place.                              |
 
-### Phased Integration Plan (Original)
+## Phased Integration Plan
 
 1. **Ship a usable toolkit bundle**
    - Connect `common/amazon_toolkit/index.js` to the real module implementations (either via `require` statements or by building a concatenated file for `@require`).
@@ -100,13 +83,13 @@
    - Create a small Node-based smoke test that loads `tests/fixtures/amazon/products/*.html` via `jsdom`, pipes each into `AmazonToolkit.extractProductData()`, and asserts markdown produced by toolkit matches expected snapshots.
    - Wire that harness into CI or at least document the command so we can run it before shipping future ![amazon](docs/images/icons/amazon.png) `Amazon` changes.
 
-### Validation & Manual Testing Checklist
+## Validation & Manual Testing Checklist
 - Clipboard flow: run `./violentmonkey.zsh --script markdown_linker/markdown_linker.user.js --debug`, visit two different ![amazon](docs/images/icons/amazon.png) `Amazon` product URLs, and confirm `<kbd>Alt</kbd> + <kbd>Z</kbd>` copies the new title style.
 - Buffering: hold `<kbd>Alt</kbd>` and click multiple cards to ensure the buffered list still formats correctly once toolkit-derived titles are used.
 - Non-Amazon sanity: smoke-test GitHub/Jira links to ensure toolkit imports do not affect general parsing paths.
 - Fixture-driven regression: run the proposed `node tests/amazon_toolkit_smoke.js` script to compare extractor output against stored JSON for `product_00`, `product_01`, `product_02` fixtures.
 
-### Open Questions
+## Open Questions
 - Should we prefer toolkit markdown generation (which may include brand + variant data) everywhere, or only in `<kbd>Alt</kbd> + <kbd>Z</kbd>` mode while keeping manual menu entries stable for now?
 - Do we want to expose toolkit options (URL format short/medium/long, title max length) as ViolentMonkey preferences before flipping the defaults?
 - What is the desired distribution method for the toolkit bundle (single concatenated file committed to the repo vs. generated artifact during build)?
