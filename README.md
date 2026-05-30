@@ -1,99 +1,50 @@
+
+
+
 # About
 
-This repository contains a series of scripts for Greasemonky, Violentmonkey, etc... Each nested in a subfolder. 
+This repository contains a series of userscripts for Greasemonky, Violentmonkey, etc... Each nested in a subfolder. 
 
 
-You can edit/debug the source using Greasemonky's IDE, etc... 
+# Userscripts
 
-See this zsh script to assist with editing in `VSCode`: [violentmonkey.zsh](violentmonkey.zsh)
-
-```zsh
-# violentmonkey.zsh --help
-# violentmonkey.zsh --script <path_to_user.js>
-# violentmonkey.zsh --script <path_to_user.js> [--preferred-ip <a.b.c.d>] [--debug]
-
-violentmonkey.zsh \
-  --script $HOME/code/repositories/z2k/github/greasemonkey/markdown_linker/markdown_linker.user.js \
-  --preferred-ip "127.0.0.1" \
-  --debug 
-```
-
-![alt text](images/Firefox_20251102161205.png)
-
-# Violentmonkey
-![edit_violent_monkey](images/edit_violent_monkey.png)
-
-
-``` sh
-# # An easy/recommended http-server for debugging javascripts
-# brew install http-server
-
-# Launch the server with a 5 second cache
-http-server -c5
-
-# Same as ^, but opens browser to this source file (which you'll want open anyhow)
-http-server -c5 -o amazon_item_blocker/amazon_sponsor.user.js
-```
-
-Once the source is open in your browser, change these settings:
-
-![external_editor_reload](images/external_editor_reload.png)
+> [!NOTE]
+> A userscript (or user script) is a program, usually written in JavaScript, for modifying web pages to augment browsing. Uses include adding shortcut buttons and keyboard shortcuts, controlling playback speeds, adding features to sites, and enhancing the browsing history.
+> 
+> From [Userscript - Wikipedia](https://en.wikipedia.org/wiki/Userscript)
 
 
 
-# Debugging
+# Directories
 
-* To use breakpoints, insert the line `debugger;` which is like a programmatic breakpoint.
-* Open your browser debugger then reload the page. You should hit the breakpoint. 
-* Inspect elements and properties using breakpoint
-
-
-![firefox_debugger_breakpoint](images/firefox_debugger_breakpoint.png)
-
-
-
-# Questions
-
-## Preferences/Settings
-* [ ] Can we read/write preferences?
-  * [ ] Where is the data stored?
-* [ ] How can we make settings page for a script?
-  * [ ] violentmonkey support?
-  * [ ] custom UI 
+## `common`
+* The `common` contains code that is intended to be reusable. 
+* The idea was to create javascript libraries that can be re-used across any type of javascript environment. Specifically:
+  * userscripts (most important)
+  * node script
+  * normal javascript
 
 
-## Element Interactions
+### `common/youtube_toolkit`
+* This is a javascript library to help with extracting data from youtube pages
+  * channel properites
+  * playlist infromation
+  * video informatoin
+  * etc...
+* Read all source files staring with `common/youtube_toolkit/README.md`, `IMPLEMENTATION_STATUS.md`, `index.js`, etc...
 
-### Buttons
-* [X] ~~*How to add a button to an element?*~~ [2025-06-30] 
-  * EX: Click on the button to copy markdow to clipboard
-* [ ] How to copy an existing button (to clone the appearance, etc..)
-* [ ] How to control layout?
-
-References
-* [Create an HTML button programmatically](https://sebhastian.com/javascript-create-button/)
-* [Mozilla Clipboard Reference](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/write#write_text_to_the_clipboard)
-
-
-### On click event
-* [write to clipboard onclick](https://www.w3schools.com/howto/howto_js_copy_clipboard.asp)
-* [X] ~~*Can we detect modifier keys when clicking?*~~ [2025-06-30]
-  * [mozilla ref](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/getModifierState)
-  * [mozilla keyboard event](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent)
-* [ ] Can we detect normal keys when clicking?
-* [ ] How about straight up hotkeys?
-
-### Read/Write to OS Clipboard
-* [ ] can we write to os clipboard? 
-  * EX: Copy data as markdown
-  * [Write to clipboard on click (HTML example)](https://www.w3schools.com/howto/howto_js_copy_clipboard.asp)
-  * [Mozilla Reference](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/write#write_text_to_the_clipboard)
-
-### Read/Write to filesystem
-* [ ] can a script write a text file to the file system?
-
-### Context Menu (right click)
+### `common/amazon_toolkit`
+* This is a javascript library to help with extracting data from amazon web pages
+  * product properites
+  * seller/store infromation
+  * searches, 
+  * etc...
+  * building markdown representation products, sellers, etc... (links, lists, etc...)
+* Read all source files staring with `common/youtube_toolkit/README.md`, `IMPLEMENTATION_STATUS.md`, `index.js`, etc...
 
 
 
 
+# Development & Contributing
+
+* See [CONTRIBUTING.md](CONTRIBUTING.md)
