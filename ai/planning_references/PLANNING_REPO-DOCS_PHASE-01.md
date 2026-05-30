@@ -30,4 +30,8 @@ In order to understand what this repostiory is:
 ---
 
 
+# claude rules
+
+I'd like you to pull `~/.ai/instructions/userscript/*` into this repository as claude rules
+
 

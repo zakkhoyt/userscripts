@@ -88,6 +88,27 @@ We will be working on
     * macos (currently `26.4.1`)
     * firefox (currently `151.0.2`)
     * violentmonkey (currently `2.40.0`)
+* I would prefer to link or load libraries vs bundling them.
+* HOwever I can live with bundling so long as:
+  * it's easy to deploy new userscript changes
+  * the library source code can still be used with node scripts / js scripts
+* We had tried formatting the library code in a a couple of different ways/conventions and then tried loading them from the userscripts.
+  * I want to make sure that we left those libraries with the most modern library/interface conventions, not an older or weird convention. 
+  * That is, so long is i doesnt' affect the bundler
+* I noticed this new feature in violentmonkey: [Inject scripts into different contexts](https://violentmonkey.github.io/posts/inject-into-context/) 
+  * Does this have to do with our bundling problem?
+  * Please summarize what this new feature is good for and what we could do with it. 
+
+
+## ActionItems
+
 
 
 --- 
+
+
+
+
+
+
+
