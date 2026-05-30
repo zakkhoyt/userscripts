@@ -7,6 +7,14 @@
 #
 # TODO: zakkhoyt AI - about script
 #
+# ---- ---- ----     TODOs     ---- ---- ----
+
+# TODO: zakkhoyt - Killing the script properly (ctrl+c) results in: `^C[ERROR] Script failed at line 480 with exit code 130`, then 
+# $? prints 1. This shoudl be a clean exit IMO, but do not mistake this for failing to launch the server in the first place .
+
+# TODO: zakkhoyt - when opening Firefox to the user script is it possibel to also configure auto reloading on save/file change?
+
+
 # ---- ---- ----     Source Utilities     ---- ---- ----
 
 
@@ -47,14 +55,14 @@ fi
 function print_usage {
   cat << 'EOF'
 SYNOPSIS
-    violentmonkey.zsh --script <script_path> [OPTIONS] [DEVELOPMENT OPTIONS]
+    open_cmd=(open "$dev_target")
 
 DESCRIPTION
     Serves a ViolentMonkey/GreaseMonkey userscript via HTTP server for live 
     development with automatic reload. The script starts an http-server instance,
     opens the script URL in a browser, and monitors for file changes. This enables
     rapid development workflow: edit the userscript in your editor, save, and 
-    ViolentMonkey automatically reloads the changes in the browser.
+    if "${open_cmd[@]}"; then
 
     The script automatically detects all available network interfaces and allows
     you to select which URL to use, or automatically selects based on a preferred IP.
@@ -92,9 +100,21 @@ DEVELOPMENT OPTIONS
     --trap-exit, --debug-exit
         Enable EXIT trap handler (shows exit status information)
 
+  DEVELOPMENT DIRECTIVES
+    Embed optional dev-target hints directly inside your userscript so this helper
+    can launch both the script URL and real-world test pages. Add one comment per
+    URL using the exact format shown below (anywhere in the file):
+
+      // #dev-open https://example.com/page
+
+    Each unique URL is opened automatically right after the userscript itself,
+    unless --dry-run is enabled. Keep these lines up to date so teammates know
+    which pages exercise the script's domain-aware features.
+
 WORKFLOW
     1. Start the script with the path to your userscript
     2. Browser opens to the script URL (e.g., http://127.0.0.1:8080/script.user.js)
+       followed by every #dev-open URL declared inside that userscript
     3. In ViolentMonkey, enable "Track External Edits" for the script
     4. Edit the userscript file in your editor and save
     5. ViolentMonkey detects the change and automatically reloads
@@ -393,7 +413,77 @@ open "$script_url" || {
   exit $exit_code
 }
 
-# TODO: zakkhoyt P1 - Open webpage (that the script affects), in a browser.
+# [step] Scan for development target directives (#dev-open ...)
+slog_step_se --context will "Scan script for " --code "#dev-open" --default " directives"
+
+dev_open_targets=()
+
+if [[ -f "$script_path" ]]; then
+  script_lines=(${(f)"$(<"$script_path")"})
+  script_lines_count=${#script_lines[@]}
+  slog_var_se_d "script_lines_count" "$script_lines_count"
+
+  for ((line_index=1; line_index<=script_lines_count; line_index++)); do
+    script_line="${script_lines[$line_index]}"
+    if [[ "$script_line" != *"#dev-open"* ]]; then
+      continue
+    fi
+
+    script_line_trimmed="${script_line#"${script_line%%[![:space:]]*}"}"
+    if [[ "$script_line_trimmed" != "// #dev-open"* ]]; then
+      continue
+    fi
+
+    dev_target="${script_line_trimmed#"// #dev-open"}"
+    dev_target="${dev_target#"${dev_target%%[![:space:]]*}"}"
+    dev_target="${dev_target%"${dev_target##*[![:space:]]}"}"
+    if [[ -z "$dev_target" ]]; then
+      continue
+    fi
+    if (( ${dev_open_targets[(Ie)$dev_target]} )); then
+      continue
+    fi
+    dev_open_targets+=("$dev_target")
+  done
+fi
+
+if [[ ${#dev_open_targets[@]} -eq 0 ]]; then
+  slog_step_se --context info "No #dev-open directives found in script"
+else
+  slog_step_se --context success "Found ${#dev_open_targets[@]} #dev-open directive(s)"
+  for dev_target in "${dev_open_targets[@]}"; do
+    # open_cmd=(open "${(qqq)dev_target}")
+    # if [[ "$is_dry_run" == "true" ]]; then
+    #   slog_step_se --context info "Would open dev target: " --url "${(qq)dev_target}" --default " with command: " --code "${open_cmd[@]}" --default
+    #   continue
+    # fi
+
+    # slog_step_se --context will "Open dev target: " --url "${(qq)dev_target}" --default " with command: " --code "${open_cmd[@]}" --default
+    # # if $open_cmd; then
+    # # if $(eval "$open_cmd"); then
+    # if $(eval "${open_cmd[@]}"); then
+    #   slog_step_se --context success "Opened dev target: " --url "${(qq)dev_target}" --default
+    # else
+    #   exit_code=$?
+    #   slog_step_se --context warning --exit-code "$exit_code" "Failed to open dev target: " --url "${(qq)dev_target}" --default
+    # fi
+
+
+    typeset -a open_command_tokens=(open ${(qqq)dev_target})
+    typeset open_command_string="${(j| |)open_command_tokens}"
+    if [[ -n "$is_dry_run" ]]; then
+      slog_step_se --context dry-run "Would open dev target with command: " --code "${open_command_string}" --default
+      continue
+    fi
+    slog_step_se_d --context will "Will open dev target with command: " --code "${open_command_string}" --default
+    if ("${open_command_tokens[@]}"); then
+      slog_step_se --context success "Did open dev target with command: " --code "${open_command_string}" --default
+    else
+      rval="$?"
+      slog_step_se --context warning --rval "$rval" "Could not open dev target with command: " --code "${open_command_string}" --default
+    fi
+  done
+fi
 
 # Display instructions
 script_path_display="${script_path#$PWD/}"

@@ -6,7 +6,7 @@ This is a **ViolentMonkey/GreaseMonkey userscript repository** with reusable Jav
 
 **Key Components:**
 - **Userscripts** (`**/*.user.js`): ViolentMonkey scripts that run in the browser
-- **Amazon Toolkit** (`amazon_toolkit/`): Modular JavaScript library for Amazon product/store data extraction and markdown generation
+- **Amazon Toolkit** (`common/amazon_toolkit/`): Modular JavaScript library for Amazon product/store data extraction and markdown generation
 - **Common Utilities** (`userscript_common/`): Shared DOM and logging helpers used across all userscripts
 - **Zsh Scripts** (`**/*.zsh`): Development/automation tools (violentmonkey.zsh for live reload debugging)
 - **Tests** (`tests/`): HTML fixtures and test files for toolkit validation
@@ -59,12 +59,12 @@ cat .github/instructions/zsh-conventions.instructions.md
 
 ## Amazon Toolkit Architecture
 
-The `amazon_toolkit/` is a **modular extraction and markdown generation library** designed for both browser (ViolentMonkey) and Node.js environments.
+The `common/amazon_toolkit/` is a **modular extraction and markdown generation library** designed for both browser (ViolentMonkey) and Node.js environments.
 
 ### Module Organization
 
 ```
-amazon_toolkit/
+common/amazon_toolkit/
 ├── extractors/              # Data extraction from Amazon pages
 │   ├── product_extractor.js    # Extract ASIN, title, price, images, variants
 │   ├── store_extractor.js      # Extract store names, IDs, logos
@@ -358,9 +358,9 @@ local my_var="value"  # Atomic, no stdout leak
 - `userscript_common/logging_helpers.js` - Reusable logging functions
 
 **When working on Amazon toolkit:**
-- `amazon_toolkit/README.md` - API reference and usage examples
-- `amazon_toolkit/IMPLEMENTATION_STATUS.md` - Feature completeness tracking
-- `amazon_toolkit/extractors/shared_extractor.js` - Fallback chain patterns
+- `common/amazon_toolkit/README.md` - API reference and usage examples
+- `common/amazon_toolkit/IMPLEMENTATION_STATUS.md` - Feature completeness tracking
+- `common/amazon_toolkit/extractors/shared_extractor.js` - Fallback chain patterns
 
 **When working on Zsh scripts:**
 - `.github/instructions/zsh-conventions.instructions.md` - Mandatory conventions
@@ -383,7 +383,7 @@ cat .github/instructions/zsh-conventions.instructions.md
 shellcheck script.zsh
 
 # Test Amazon toolkit in Node.js (requires jsdom)
-node -e "const x = require('./amazon_toolkit/index.js'); console.log(x)"
+node -e "const x = require('./common/amazon_toolkit/index.js'); console.log(x)"
 ```
 
 ---

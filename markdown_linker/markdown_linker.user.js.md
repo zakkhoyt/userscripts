@@ -1,217 +1,35 @@
 
-# IDEAS
-
-* [X] ~~*For the amazon.com domain, omit leading `Amazon: ` or `Amazon.com: ` from the composed title that we build for the markdown link*~~ [2026-01-15]
-  * [X] ~~*Do this no matter which menu entry was clicked on, no matter how the script was invoked.*~~ [2026-01-15] 
-
-
-
-* [X] ~~*for amazon products, change the opt+z+click behavior from `url reverse` to `url forward`*~~ [2026-01-16]
-  * [X] ~~*url reverse gives unreadable results on this domain. EX:*~~ [2026-01-16] 
-    * [X] ~~*url reverse: `[Dp - B08 J4 Qqj3 K](https://www.amazon.com/dp/B08J4QQJ3K)`*~~ [2026-01-16]
-    * [X] ~~*page title: [Amazon Grocery, Mexican-Style Four Cheese Blend, 8 Oz (Previously Happy Belly Packaging May Vary) : Grocery & Gourmet Food](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)*~~ [2026-01-16]
-* [X] It's still always using `URL (reverse)` despite what the preference is set to for amazon products
-  * [X] As I cycle through that preference, one of the entires is printed as `28 Alt+Z title: URL (front) (click to cycle)`.
-    * I'm not sure that this is supposed to correlate to? 
-    * IN the popup menu, there are
-      * URL (FORWARD)
-      * URL (REVERSE)
-    * is (front) supposed to be (forward)? or is there something else going on?
-  * [X] the `URL (REVERSE)` option is ding something weird:
-    * EX; 
-      * the url: `https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2`
-      * expected: [B075Y8ZV89 dp](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
-      * actual: [B075 Y8 Zv89](https://www.amazon.com/Mexican-Style-Previously-Happy-Belly-Packaging/dp/B075Y8ZV89?crid=3KNODTGGEZSWZ&sprefix=chee%2Caps%2C273&sr=8-2)
-    * [X] whe are spaces being inserted into `B075Y8ZV89`?
-    * [X] where is `dp`? It's supposed to take the last two path components right?
-
-
-
-* several of the amazon related functions in `markdown_linker/markdown_linker.user.js` should maybe reside instead in `amazon_toolkit`. 
-  * Also, there are many functions in amazon_toolkit that can improve `markdown_linker/markdown_linker.user.js`
-    * classify amazon.com urls as "product url", "store url"
-    * classify amazon product urls by url syntax: "dp", "asin", etc..
-  * This will allow improved behavior such as:
-      * EX: I want to do something like: If url is amazon.product then formt the title like this. Else if url is amazon.store then formt the title like this. url is amazon.search then formt the title like this...
-        * MOre to come on this later
-  * Promotes DRY
-  * Smaller userscript
-* ActionItems
-  * re-read AI instructions
-  * [X] Evaluate `common/amazon_toolkit/**`
-  * [X] Evaluate `markdown_linker/markdown_linker.user.js`
-  * [X] Compose a list of recommendations on feasability, and how to go about doing so in steps with tests along the way
-    * [X] Write this up to `markdown_linker/docs/INTEGRATE_AMAZON_TOOLKIT.md`
-  * [X] Report back to me and we will discuss before implementing
 
 
 
 
-
-
-
-* It seems to work, however I noticed a few things. The attached image is a screenshot of the popup menu
-  * [X] ~~The `Page Title` entry contains ![amazon](../docs/images/icons/amazon.png) `Amazon.com` prefixes which it should not~~ [2026-01-16]
-  * [X] ~~Both `URL (forward)` and `URL (reverse)` contain the word `Click`~~ [2026-01-16]
-    * This seems to be because I'm opt+clicking on product links from an amazon search result. The script is doing what it should. 
-      * [Sspa - Click](https://www.amazon.com/sspa/click?ie=UTF8&spc=MTo4NDMxMzE2NzI3OTkzNTQ0OjE3Njg1NTE4OTQ6c3BfYXRmOjMwMDMzNzY5MTk2NzYwMjo6MDo6&url=%2FORGANIC-VALLEY%25C2%25AE-Cheddar-Shredded-Favorites%2Fdp%2FB0CTPML3NM%2Fref%3Dsr_1_1_us_f3_0o_wf_sspa%3Fcrid%3D3IQZAAPYR2W7D%26dib%3DeyJ2IjoiMSJ9.RmKs221QSC8FWBU71iLzAQWkHZf2724fwJhddD_DrHNTGQdQ5nyUrzseLWNp5cmfCu4Z3JcRY8D2rmAfjy-RcVndDdN3VrK16s5WPrpiHCsjF7UnI4oK32K6eQIMonSihYHYM0JKrKgL41vlKCEB-v9YceJoKMvjnVxfxElJolimq2ZCmaEgquJjYCxA8cpj6q-GjQ-oo_1IFUymuTgdf59wu5pj2n9v7A6NMj1bzy3407PFcAGMSRxhUkzvGO53NmYoZLKITWcNp8wCPw_E_M_BVEw4NMvv_q2Mv_PJVW4.y3OsBcpt4uKcmMw_P2QB1iIR79WE4DNzgRRETWafwQQ%26dib_tag%3Dse%26keywords%3Dcheese%26qid%3D1768551894%26sprefix%3Dchee%252Caps%252C242%26sr%3D8-1-spons%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9hdGY%26psc%3D1)
-    * more on this after the amazon_toolkit refactor is complete. 
-  * On another test click (opt+click on a product pages background) 
-    * [X] ~~Issue with `title`: product the `URL (forward)` contains some URL encoded text EX: `%c2`~~  [2026-01-16]
-      * Expected title: [Organic Valley® Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-      * Actual title: [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-    * [X] ~~Issue with the `url`: this is not a cleaned up / short ![amazon](../docs/images/icons/amazon.png) `Amazon` product link. The path has the description in it still, and there are unwanted query params.~~ [2026-01-16]
-      * Expected url: [Organic Valley® Cheddar Shredded Favorites - Dp](https://www.amazon.com/dp/B0CTPML3NM?)
-      * Actual url: [Organic Valley® Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-* Now that we have access to the amazon_toolkit, we can categorize amazon links and maybe we can translate to other kinds of links types too. 
-  * EX: If I go to amazon.com then type  somethign in the search bar, it will show me a list of products. 
-    * when I click on these, amazon_toolkit should be able to tell us if the link is a product link, a store link, etc...
-      * but as I mentioned above this document, sometimes these search result have intermediate links.
-        * EX: Searchign for "cheese" returned this as one of the products. 
-        * https://www.amazon.com/sspa/click?ie=UTF8&spc=MTo4NDMxMzE2NzI3OTkzNTQ0OjE3Njg1NTE4OTQ6c3BfYXRmOjMwMDMzNzY5MTk2NzYwMjo6MDo6&url=%2FORGANIC-VALLEY%25C2%25AE-Cheddar-Shredded-Favorites%2Fdp%2FB0CTPML3NM%2Fref%3Dsr_1_1_us_f3_0o_wf_sspa%3Fcrid%3D3IQZAAPYR2W7D%26dib%3DeyJ2IjoiMSJ9.RmKs221QSC8FWBU71iLzAQWkHZf2724fwJhddD_DrHNTGQdQ5nyUrzseLWNp5cmfCu4Z3JcRY8D2rmAfjy-RcVndDdN3VrK16s5WPrpiHCsjF7UnI4oK32K6eQIMonSihYHYM0JKrKgL41vlKCEB-v9YceJoKMvjnVxfxElJolimq2ZCmaEgquJjYCxA8cpj6q-GjQ-oo_1IFUymuTgdf59wu5pj2n9v7A6NMj1bzy3407PFcAGMSRxhUkzvGO53NmYoZLKITWcNp8wCPw_E_M_BVEw4NMvv_q2Mv_PJVW4.y3OsBcpt4uKcmMw_P2QB1iIR79WE4DNzgRRETWafwQQ%26dib_tag%3Dse%26keywords%3Dcheese%26qid%3D1768551894%26sprefix%3Dchee%252Caps%252C242%26sr%3D8-1-spons%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9hdGY%26psc%3D1
-        * This is not directly what I would consider to be a product link, but it does contain the information needed to create one (the `url` query param contains  `dp` / and `asin` as well as the url description of the product)
-        * if I click on that link it takes me here: https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1
-* [X] ~~Update the script to classify an ![amazon](../docs/images/icons/amazon.png) `Amazon` link. Make sure this is clear in the logs~~ [2026-01-16]
-* [X] ~~Transforming `Amazon Product` URLs~~ [2026-01-16]
-  * When the script receives a `amazon.com` based link, and that link is classified as a `product` then I want to do some more refining
-  * [X] ~~Do this no matter which menu entry was clicked on, no matter how the script was invoked.~~ [2026-01-16]
-    * Compute the markdown link title and url like normal, but before those are composed into a markdown link, lets do some further conditioning:
-      * In the title I want to remove these text blurbs. NOTE: I believe that the script or amazon_toolkit might already have code to handle some of these, thoguh I'm not sure it's doing so how/when I described above. Also nto sure it's covering all of these cases yet
-        * ` at Amazon Women’s Clothing store`
-        * ` at Amazon Men’s Clothing store`
-        * ` : Clothing, Shoes & Jewelry`
-        * `: Clothing, Shoes & Jewelry`
-        * `Amazon Grocery, `
-        * ` - Dp`
-      * I think these can all be addressed with these two regex (`sed -E` like pseudcode)
-        * regex: `s/(*.)( ?at Amazon.*)/$1/g`
-        * regex: `s/(*.)( ?: Clothing, Shoes & Jewelry)/$1/g`
-        * regex: `s/(Amazon Grocery, )(.*)/$1/g`
-        * regex: `s/(*.)( - Dp)/$1/g`
-        * replace them with `""`
-      * [X] ~~research the current script to see if it is handling any of these cases, where and when it's doing so. If it doesn't align with what i described above, then let's discuss.~~ [2026-01-16]
-* That was a longer list. Please summarize what you are taking away before doing anything
-
-
-
-* A few meta notes. 
-  * [X] ~~*I noticed you stopped checking off `[ ]` items in `markdown_linker/markdown_linker.user.md`.*~~ [2026-01-16]
-    * Update this frequently
-  * [X] ~~*it seems you arent updating `markdown_linker/docs/INTEGRATE_AMAZON_TOOLKIT.md` very frequently at all.*~~ [2026-01-16]
-    * Update this frequently, even with what the current problem is. 
-    * Also be sure to mark thigns off in this doc or delete them
-
-* okay the menu is back but still the logs are full of "amazon unavailabel" 
-* [ ] Is this maybe a false flag? Could the extension get this far without the library at this point? I though you removed the fallback legacy stuff. New logs at `markdown_linker/.gitignored/logs_amazon_product.log` It say things like:
-```log
-03:01:52.858 markdown_linker: Amazon toolkit unavailable Markdown Linker.user.js:171:21
-03:01:52.858 markdown_linker: end getAmazonToolkit Markdown Linker.user.js:209:21
-```
-* but then goes on to do things like
-```log
-03:01:52.858 markdown_linker: Normalized Amazon title: "ORGANIC VALLEY® Spicy Cheddar Shredded Cheese, Flavor Favorites, 6 oz : Grocery & Gourmet Food" Markdown Linker.user.js:171:21
-03:01:52.858 markdown_linker: end normalizeTitleForUrl Markdown Linker.user.js:209:21
-03:01:52.858 
-```
-* [ ] Let' talk about these logs. Currently every line logged from the execution of that userscript shows a previx of   `markdown_linker: `
-  * [ ] This is great, but I'd like additional prefix when lines are logged from the `amazon_toolkit`. Something like: `markdown_linker: [amazon_toolkit]`. 
-    * [ ] Hold this though, maybe we will currently get logs like what I describe if the `amazon_toolkit unvailable` logs are to be believed. 
-* Every log line generated from the user.js is suffixed with `Markdown Linker.user.js:$line:$col`
-  * [ ] why is it calling this script `Markdown Linker.user.js`? The name is snake case `markdown_linker.user.js`. Fix this
-* I noticed that in `amazon_toolkit`, that that code writes logs, but something here gives me pause
-  * EX: in `common/amazon_toolkit/links/link_parser.js`:  `function logWarn(...args) { /* Implementation in logging_helpers.js */ }`
-    * `logging_helpers.js` is NOT part of this toolkit, rather it's in `userscript_common/logging_helpers.js`. While this is better than it being part of ther `user.js`, this library needs to function from node consumers, and other userscript consumers. 
-      * [ ] Move all of `userscript_common/*` to somwhere under `common`. 
-        * [ ] Ensure this is a valid thing to do before hand. 
-        * [ ] Shoudl those files be re-written to follow the same convention as the other files in that dir? Or can/shoudl we keep as is?
-
-
-
-* On product page
-  * [ ] every one of these stil has a bloated (unshortened) url
-  * opt+z+click on BG: [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-  * page title: [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-  * url (f): [Organic Valley%c2%ae Cheddar Shredded Favorites - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-  * url (r): [B0CTPML3NM - Dp](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-  * meta: [ORGANIC VALLEY® Spicy Cheddar Shredded Cheese, Flavor Favorites, 6 oz : Grocery & Gourmet Food](https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1)
-* I saved browser logs when making the popup menu present at: `markdown_linker/.gitignored/logs_amazon_product.log`. Relevant logs begin around `02:38:06.664`
-  * [ ] I noticed things that suggest the toolkit libs aren't working:
-    * `02:28:32.738 markdown_linker: YouTube toolkit unavailable Markdown Linker.user.js:169:21`
-    * `02:38:09.754 markdown_linker: Amazon toolkit unavailable Markdown Linker.user.js:169:21`
-      * [ ] Why aren't these being logged at `warnign` or even `error`?
-      * [ ] Why are we falling into this condition?
-  * [ ] why do the log lines call this script `Markdown Linker.user.js`, not `markdown_linker.user.js`? Fix this
-
-* [ ] When opt+clicking on the background of an amazon product (`https://www.amazon.com/ORGANIC-VALLEY%C2%AE-Cheddar-Shredded-Favorites/dp/B0CTPML3NM?crid=3IQZAAPYR2W7D&sprefix=chee%2Caps%2C242&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1`), I'm still seeing some things that I believe should be changed by now?
-  * Trailing `- Dp` is still present in the `title` (but the hexchars seem to be resolved) See attached image
-  * [ ] let's add another title substring removal `s/(.*)( ?: Grocery & Gourmet Food)/$1/g`
-
-
-
-
-
-
-
-
-* [ ] add a new link formatting style (along with `page title`, `url (forward)`, etc,) which will be titled "domain specific"
-  * set this part of the code up so that in the future we can add new domains and rules to it. 
-    * consider reading in a json document that can define these things. We would need to define a schema (discuss back and forth)
-
-
-
-
-* Documentation and Tests: I'm not a java programmer (but am a zsh programmer, iOS programmer) 
-  * [ ] User facing documentation. I'm not familiar with how to surface SDK documentation in either:
-    * A java-script library like `amazon_toolkit` 
-      * The ai instructions i set up in this repo are very heavy handed on javascript comments, but not SDK doc systems. 
-        * perhpas there's a tool that will compile those exisitng comments into docs? That's a step formwared, but we are still mising usage examples, table of contents, that kind of stuff
-    * With `*.user.js` files
-  * [ ] Adding unit tests and using them to drive development and refactors
-    * Test for java-script library like `amazon_toolkit` 
-    * Test for `*.user.js` files. 
-      * Is it possible to feed input to these files to mimick what happens in the browser? I guess in a lot of cases we'll need to lean on the browser for things, but not all
-        * Does it make sense to pull more logic out of the userscript and into libraries? (make more libs/test?)
-
-* [ ] When using opt+z+click, when the popup shows "Copied N links to clipboard", I'd like it to add a second line of text there which indicates which preference mode was used. 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+----
 
 
 
 # TODOs
 * [ ] p1 - additional modifier key to control leading `* ` in markdown list output
 
+# IDEAS
 
 
+## Youtube Link Formatting
 
+### youtube.com/watch?v=
+For urls that begin with `youtube.com/watch?v=` use `page` format, but performe some additional clean up:
+* [ ] Remove the leading number in parenthesis (if exists)? Regex: `^\(\d+\) `
+* [ ] Remove suffix: ` - Youtube`
+* [ ] Add new prefix: `Youtube: `
+Examples: 
+* Actual: `(42) How a YouTuber SOLVED a 67-Year Cold Case Police Called "Impossible" - YouTube`
+* Expected: `How a YouTuber SOLVED a 67-Year Cold Case Police Called "Impossible"`
 
+* [Portland / Columbia River](https://www.youtube.com/watch?v=9tEIBj4f378)
 
-
-
-## Youtube 
-
-### Status (2025-12-07)
-- [x] Opt/Alt menus detect ![youtube](../docs/images/icons/youtube.png) `YouTube` watch pages and add `YouTube: <channel> - <title>` options powered by the shared toolkit.
-- [x] Timestamp entries now offer short-link variants (`?t=283`, `?t=283s`, `?t=4m43s`) using the active playback position.
-- [x] Playlist surfaces expose a "Playlist → Markdown List" option plus direct playlist links derived from the extractor payload.
-- [x] Alt+Z auto-infer favors the YouTube-specific title when no manual selection exists.
+Implementation notes:
+- `document.title` already contains the noisy prefix/suffix, so run the cleanup regex chain before applying the `Youtube: ` prefix.
+- When the DOM exposes `<meta property="og:title">`, prefer that value because it usually omits notification counters.
+- Keep fallbacks predictable: cleaned page title → anchor text → auto-generated domain-based title.
 
 ### channel title
 * desired format for videos: `Youtube: <channel_name> - <video_title>`
@@ -230,6 +48,11 @@ video_title: PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity
 <yt-formatted-string force-default-style="" class="style-scope ytd-watch-metadata" title="PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!">PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!</yt-formatted-string>
 ```
 
+Implementation notes:
+- Channel name lives under `#owner` (desktop) or `.ytd-channel-name` anchors. Query all obvious selectors, trim whitespace, and cache the first non-empty value.
+- Video titles surface via `meta[property="og:title"]`, `#title yt-formatted-string`, or the `ytd-watch-metadata` block—read them in that order.
+- If either lookup fails, fall back to the cleaned `youtube.com/watch?v=` formatting so menu entries stay deterministic.
+
 
 ### timestamped url
 * For popup menu on youtube video, try to add entry for timestamped URL
@@ -239,6 +62,41 @@ video_title: PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity
   * timestamped url (minutes, seconds): `https://youtu.be/LI6OhRtqyXw?t=4m43s`
 * the youtube player has a context menu: `Copy video URL at current time`
 * Maybe we can read the elapsed of the video player to compose a url ourselves
+
+Implementation notes:
+- The primary `<video>` element exposes `currentTime` (seconds). Read it via `document.querySelector('video')?.currentTime` when the page is active.
+- Derive variants from the same number: raw seconds (`?t=283`), suffixed seconds (`?t=283s`), or human-readable `?t=4m43s` by converting with integer division/modulo.
+- Prefer the short `youtu.be/<id>` domain for timestamped entries so links stay compact.
+
+### youtube_toolkit
+Create a sibling toolkit (similar to `common/amazon_toolkit`) dedicated to ![youtube](../docs/images/icons/youtube.png) `YouTube` page analysis. Goals:
+
+- **Compatibility**: Every extractor accepts either a live browser `document` or a jsdom document so the toolkit works in both the userscript and Node-based test harnesses.
+- **Folder layout**:
+  - `youtube_toolkit/extractors/video_extractor.js` — normalize video metadata (title, description, duration, current playback time, canonical URL, and JSON-LD fallbacks).
+  - `youtube_toolkit/extractors/channel_extractor.js` — pull channel name, handle, avatar URL, badge state, subscriber counts, etc.
+  - `youtube_toolkit/extractors/playlist_extractor.js` — read playlist title plus the ordered list of constituent videos (id, title, duration, channel) so consumers can build markdown lists.
+  - `youtube_toolkit/extractors/page_state_extractor.js` — classify whether the DOM represents a watch page, playlist page, channel landing, shorts, or other surfaces.
+  - `youtube_toolkit/helpers/time_helpers.js` — convert seconds ↔︎ `XmYs`, guard against NaN, and format timestamps for menu labels.
+  - `youtube_toolkit/helpers/dom_helpers.js` — resilient selector wrappers (shadow DOM safe queries, attribute normalization) to shield consumers from small markup changes.
+  - `youtube_toolkit/index.js` — aggregate exports so downstream code can `require('youtube_toolkit').videoExtractor`, mirroring the Amazon toolkit pattern (CommonJS modules for consistency).
+- **Playlist feature (MVP)**:
+  - On Opt+Click, if the anchor or current page references a playlist, offer a “Playlist → Markdown List” option that renders each video as `* [Title](URL)` using the extractor data.
+  - Ensure extractor exposes enough metadata for additional formatting (channel name per video, durations, etc.) even if the initial UI only needs titles + URLs.
+- **Watch page feature (MVP)**:
+  - Provide helpers for `channel_name`, `video_title`, and `currentTime` so the userscript can offer the `Youtube: Channel - Title` format plus timestamped link variants.
+- **Future ideas (not in first cut)**:
+  - Channel landing pages → enumerate featured playlists and return a structured list (useful for future Opt+Click actions that dump curated playlist collections).
+  - Notification/inbox counts or live stream metadata if we ever need them.
+
+Integration notes for `markdown_linker`:
+- Detect ![youtube](../docs/images/icons/youtube.png) `YouTube` watch/playlist pages via `page_state_extractor`.
+- If on a watch page, automatically add menu entries for channel-format links and timestamped variants (only show timestamp rows when `currentTime > 0`).
+- If the target is a playlist URL, add menu entries to output markdown lists (single block or copy-to-clipboard) using the playlist extractor payload.
+
+Edge cases to consider:
+- Start playback detection: timestamp options should be hidden/disabled when the `<video>` element is paused at `0` or absent (e.g., background tab, playlist preview mode).
+- Signed-out vs signed-in DOM: selectors should degrade gracefully (especially for channel headers/subscriber counts).
 
 ## Special formatting for GitHub links
 
@@ -274,9 +132,10 @@ Mining the jira card (for `HSD-14917` in this example)
 Card (HSD-14917)
 * `Outer HTML` for the card: <div class="css-1qyv5a"><div class="css-1kotxvd"><div class="_vchhusvi _1e0c1txw _2lx21bp4 _ca0qutpp _u5f3utpp _n3tdutpp _19bvutpp _7y2iu2gc _12tyidpf _pg611b66 yse7za_content"><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section"><div role="presentation"><span class="_slp31hna _1i4q1hna _1nmz1hna _u5f3xy5q _1yyj11wp _1e0ccj1k _1reo15vq _18m915vq _sudp1e54 yse7za_summary">[IoTShadowClient] Remove memberId from API interface, obtain from UserDefaults</span></div></div><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section"><div class="css-1a6b7sz"><div role="presentation" class="_p12f1osq"><span class="_p12f1osq _1e0c1txw _1bah1y6m _4cvr1h6o _13t37vkz"><span style="color: var(--ds-text-inverse, #FFFFFF); background-color: var(--ds-background-accent-orange-bolder, #C25100); --darkreader-inline-color: var(--darkreader-text--ds-text-inverse, var(--darkreader-text-ffffff, #d4d3d0)); --darkreader-inline-bgcolor: var(--darkreader-bg--ds-background-accent-orange-bolder, var(--darkreader-background-c25100, #98511f));" class="_2rkofajl _11c81o8v _p12f1osq _k48pmoej _1p1dangw" data-darkreader-inline-color="" data-darkreader-inline-bgcolor=""><span class="_1reo15vq _18m915vq _1e0c1o8l _1bto1l2s _s7n4jp4b _o5721q9c _vchhusvi _p12f1osq _ca0qidpf _u5f31b66 _n3tdidpf _19bv1b66">[iOS] Connectivity Rewrite - IoT</span></span></span></div></div></div><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section"><div data-testid="platform-card.common.ui.custom-fields.custom-card-field-list" class="_zulp1b66 _1bsb1osq _p12f1osq _1e0c1txw _2lx21bp4 yse7za_customCardFieldList"><div role="presentation"><div><div data-testid="platform-card.common.ui.custom-fields.card-custom-field.text-card-custom-field-content.field" class="_1reo15vq _18m915vq _o5721q9c _p12f1osq _2hwx1wug _1bto1l2s _syaz1gjq _1bsk1osq _1y8m1wug _1maq1b66 _14991b66 _w9a21wug _bbhg1wug _1rjkglyw _1rxbnkob _1jbznkob _umv415vq _wwzv15vq _w77h1osq _5rkt1l2s _1suh1wug _xnkt1wug _rtysuuw1 _19l353f4 _1md0idpf _qehnidpf _18vridpf _1nlwidpf _12isidpf _ql9ct94y _1ci4idpf _1qwe1ule _1npa1y44 _pokj1osq _gzx61wug _knrj1l7b _1urb1y44 _7998idpf _18pvidpf _11o7idpf _17l5idpf _1mmrt94y _zg8l1kw7 _tzy4kb7n _lcxv1wug">iOS</div></div></div></div></div><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section" data-testid="platform-card.ui.card.card-content.footer"><div class="_zulpoqx6 _1e0c11p5 _1bsb1osq _1tke1f4h _2z05hkll _yv0e1xhj _1lmc6ou8 yse7za_footer" style="--_1rr33ui: &quot;yse7za_primary yse7za_tertiary yse7za_secondary&quot;;"><div class="_nd5lkgrd _zulp1b66 _p12f1ns9 _vchhusvi _1e0c11p5 _wij21bp4 _4cvr1h6o _1bahv2br yse7za_footerChildSection" style="--_yr074y: yse7za_primary;"><div class="_1e0c1txw _1bah1h6o _2lx21bp4"><div role="presentation"><img alt="Task" src="https://hatchbaby.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium" class="_1bsb7vkz _4t3i7vkz _s7n41ndm"></div></div><div data-testid="platform-card.common.ui.key.key" class="_16jlidpf _1o9zkb7n _i0dl1wug _1reo15vq _18m915vq _1eim1xrj _o5721q9c _1e385e4z"><a href="/browse/HSD-14917" target="_blank" class="_uizt1wug _syaz1gjq _4bfu18uv _1hmsglyw _ajmmnqa1 _1nrm18uv _1a3b18uv _9oik18uv _5bd618uv _1ydc18uv _c2waglyw _4fprglyw _1bnxglyw _13jxglyw _1x28glyw _1iohnqa1 _5goinqa1 _jf4cnqa1 _xatrnqa1 _1726nqa1"><div class="css-16l5nyr">HSD-14917</div></a></div></div><div class="yse7za_footerChildSection sc-1e1lt9n-4 ilMEXN"><div class="_vchhusvi _1e0c1txw _1bah1b1v _4cvr1h6o _1nvfidpf _1nei1b66 _rt2pidpf _bmksidpf _fhioidpf"><div class="_1e0c1txw _2lx21bp4 _1bah1h6o"><span role="presentation" data-testid="development-board-dev-info-icon.container"><button aria-expanded="false" aria-haspopup="true" aria-describedby="development-board-dev-info-icon.button-text-67222" class="css-z7eb04" tabindex="0" type="button"><span class="css-bwxjrz"><span role="img" aria-label="pull request" style="color: var(--ds-icon, #44546F); --darkreader-inline-color: var(--darkreader-text--ds-icon, var(--darkreader-text-44546f, #99a8b7));" class="_1e0c1o8l _vchhusvi _1o9zidpf _vwz4kb7n _y4ti1igz _bozg1mb9 _12va18uv _jcxd1r8n" data-darkreader-inline-color=""><svg fill="none" viewBox="0 0 16 16" role="presentation" class="_1reo15vq _18m915vq _syaz1r31 _lcxvglyw _s7n4yfq0 _vc881r31 _1bsbpxbi _4t3ipxbi"><path fill="currentcolor" fill-rule="evenodd" d="M4.25 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5M2 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 2 3.25m6-.75h1.75a2.75 2.75 0 0 1 2.75 2.75v5.378a2.251 2.251 0 1 1-1.5 0V5.25C11 4.56 10.44 4 9.75 4H8zM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5m7.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5" clip-rule="evenodd" style="--darkreader-inline-fill: currentcolor;" data-darkreader-inline-fill=""></path></svg></span></span></button><span id="development-board-dev-info-icon.button-text-67222" class="_1e0cglyw">Select to open pull request details.</span></span></div><div role="presentation"><div role="tooltip" aria-label="2 days in this column" tabindex="0" class="_zulpv77o _4t3i1osq _1e0c1txw _4cvr1h6o _1bah1h6o"><div color="var(--ds-icon-accent-gray, #758195)" style="--_xexnhp: var(--ds-icon-accent-gray, #758195); --darkreader-inline-color: var(--darkreader-text--ds-icon-accent-gray, var(--darkreader-text-758195, #989187)); --darkreader-bg--_xexnhp: var(--darkreader-bg--ds-icon-accent-gray, var(--darkreader-background-758195, #626976)); --darkreader-text--_xexnhp: var(--darkreader-text--ds-icon-accent-gray, var(--darkreader-text-758195, #989187)); --darkreader-border--_xexnhp: var(--darkreader-border--ds-icon-accent-gray, var(--darkreader-border-758195, #5f6467));" class="_2rko1rr0 _bfhk1cj8 _1bsbi2wt _4t3ii2wt" data-darkreader-inline-color=""></div><div color="var(--ds-icon-subtle, #626F86)" style="--_xexnhp: var(--ds-icon-subtle, #626F86); --darkreader-inline-color: var(--darkreader-text--ds-icon-subtle, var(--darkreader-text-626f86, #9b948b)); --darkreader-bg--_xexnhp: var(--darkreader-bg--ds-icon-subtle, var(--darkreader-background-626f86, #5c6472)); --darkreader-text--_xexnhp: var(--darkreader-text--ds-icon-subtle, var(--darkreader-text-626f86, #9b948b)); --darkreader-border--_xexnhp: var(--darkreader-border--ds-icon-subtle, var(--darkreader-border-626f86, #6e6960));" class="_2rko1rr0 _bfhk1cj8 _1bsbi2wt _4t3ii2wt" data-darkreader-inline-color=""></div></div></div><div data-testid="platform-card.common.ui.priority.icon" class="_1e0c1txw _1bah1h6o _4cvr1h6o"><div role="presentation"><img alt="Medium priority" src="/images/icons/priorities/medium_new.svg" class="_1bsb7vkz _4t3i7vkz _s7n41ndm"></div></div></div></div><div class="sc-1e1lt9n-3 clxNWt"><div class="css-6cu6fo"><div data-testid="software-board.board-container.board.card-container.card.assignee-field.button" class="_80omtlke _1gp47079 _1di411wp _lcxvglyw"><div class="css-ipsdmm"><button class="sc-1nlgjye-1 brTUJl" data-testid="issue-field-assignee.ui.popover.edit-view.test" data-aui-bypass-blur-on-esc-keyup=""><div class="_ca0qidpf _u5f3idpf _n3tdidpf _19bvidpf _1bsb1f4h _4t3i1f4h _vchhusvi _80om73ad"><div role="presentation"><div data-testid="issue-field-assignee.common.ui.read-view.popover.avatar" role="img" aria-labelledby="_rl7_" class="_12ji1r31 _1qu2glyw _12y3idpf _1e0c1o8l _kqswh2mm"><span style="--avatar-bg-color: transparent; --avatar-box-shadow: 0 0 0 2px transparent; --darkreader-bg--avatar-bg-color: var(--darkreader-background-00000000, rgba(31, 31, 31, 0)); --darkreader-bg--avatar-box-shadow: 0 0 0 2px transparent;" data-testid="issue-field-assignee.common.ui.read-view.popover.avatar--inner" class="_vchh18uv _bfhkcxp3 _16qs1nhn _19itglyw _12ji1r31 _1qu2glyw _12y31o36 _1reo15vq _18m915vq _v564ieh6 _1e0c1txw _kqswpfqs _4cvr1fhb _1bah1h6o _2lx21bp4 _80om1kw7 _6rthv77o _1pfhv77o _12l2v77o _ahbqv77o _85i5ze3t _1q51ze3t _y4tize3t _bozgze3t _t9ec1aqe _9v7aze3t _qc5o1p41 _z0ai1osq _18postnw _1hfk18uv _aetrf705 _1peqidpf _11fnglyw _1ejjglyw _mizu194a _1ah3v77o _ra3xnqa1 _128mdkaa _4dave4h9 _2rko1qll _14mj1qll _1bsb1tcg _4t3i1tcg"><img src="https://secure.gravatar.com/avatar/a36e081c75729b24b7d1a578d40d241b?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FZH-4.png" alt="" data-testid="issue-field-assignee.common.ui.read-view.popover.avatar--image" aria-hidden="true" data-vc="issue-field-assignee.common.ui.read-view.popover.avatar--image" data-ssr-placeholder-ignored="true" class="_16jlkb7n _1o9zkb7n _i0dl1osq _1e0c1txw _1bsb1osq _4t3i1osq _2rko1rr0"></span><span data-testid="issue-field-assignee.common.ui.read-view.popover.avatar--label" id="_rl7_" hidden="">Assignee: Zakk Hoyt</span></div></div></div></button></div></div></div></div></div></div></div></div></div>
 * The "Card Title" is in this card's `Outer HTML`: `Remove memberId from API interface, obtain from UserDefaults`
+
 ---
 
-
+<!-- 
 
 Create a violentmonkey script that can create a markdown link from any HTML anchor (`<a>`) in the web page with varying title data sources. 
 
@@ -395,7 +254,7 @@ Action Items
 ```
 
 
-
+ -->
 
 
 
@@ -405,20 +264,29 @@ Action Items
 
 
 # Secondary Goals
+<!--
 * [X] ~~*clean up the url. Extract info from script to form a full URL if javascript is involved. Avoid redirects.*~~ [2025-11-01] 
 * [X] ~~*URL shortening (esp amazong)*~~ [2025-11-01]
 * [X] ~~*all on page (indented)*~~ [2025-11-01]
 * [X] ~~*all on page (outdented)*~~ [2025-11-01]
+-->
 
+<!--
 * [X] ~~*if our isDebug flag == true, when writing each console log also write it to some local file, on disk, where you have access to read it.*~~ [2025-11-02] 
-    * Be sure to use proper timestamping for each log line. 
-    * We could even write a new log file each session (timestamped of course)
-    * Maybe `/tmp/userscripts/markdown_linker/logs/markdown_linker_${timestamp}.log`
-* [X] ~~*let's make `opt+z+click` (either on a anchor or off of a anchor) to automatically infer the title in this order:*~~ [2025-11-03]
-    * selected text
-    * anchor title
+  * Be sure to use proper timestamping for each log line. 
+  * We could even write a new log file each session (timestamped of course)
+  * Maybe `/tmp/userscripts/markdown_linker/logs/markdown_linker_${timestamp}.log`
+-->
 
+<!--
+* [X] ~~*let's make `opt+z+click` (either on a anchor or off of a anchor) to automatically infer the title in this order:*~~ [2025-11-03]
+  * selected text
+  * anchor title
+-->
+
+<!--
 * [X] ~~*For the opt+z+click scenario, I'd like some visualt feedback  on each click. Like a little click animation*~~ [2025-11-03]
+-->
 * [ ] success banner should preview the output (1 line truncated)
 * [ ] let's add a preference (using violentmonkey API) to let the user define their own "key shortcuts"
     * use the current as default values
@@ -449,7 +317,7 @@ Action Items
 
 
 
-
+<!-- 
 
 # amazon
 
@@ -522,140 +390,23 @@ After reading all of those files, write a 3rd file under `docs/notes/amazon_url`
 
 One more ask: Please research if there are other/supported/easier ways to do things that `amazon_tools.js` does. If so, let's discuss first. 
 
-Ask me any question along the way. Summarize before writing. 
+Ask me any question along the way. Summarize before writing.  -->
 
 --- ---
-BTW I ran into some rate limiting problems while developing amazon_tools.js, so it would be good to note that. Doing things like retaining the source code (vs re-fetching would be helpful)
-
-
----
-
-# Amazon Toolkit
-Let's explore building a reusable "amazon toolkit" (meaning a class / library / framework). 
-IE: a piece of code that that has a simplified public interface and which encasuplates the complexityies and implementation details. 
-
-Ideally we implement this "amazon toolkit", then we can update our userscript to consume it later. 
-
-## Convention
-This "toolkit" should follow our AI instructions for userscripts (`.github/instructions/userscript-conventions.instructions.md`) even if it might be general javascript file. 
-* re-read our AI instructions for userscript at `.github/instructions/userscript-conventions.instructions.md`, then apply it to this "toolkit" 
-
-## Compatibility
-This "toolkit" should be consumable from userscript, javascript, and node scripts (ideally all of these). 
-* IE: let's write it with compaitble tools (whicih I think is already covered in `docs/notes/amazon_url/AMAZON_PRODUCT_SCRAPING_GUIDE.md`)
-
-## Interface
-
-This "toolkit" should have public APIs for:
-* everything that `docs/references/amazon_fetch/amazon_tools2.js` can do
-* everything outlined in `docs/notes/amazon_url/AMAZON_PRODUCT_SCRAPING_GUIDE.md`
-* everyhing amazon related in `markdown_linker/markdown_linker.user.js`
-
-
-## DataSources & References
-This "toolkit" should use all of our dataSources (*md, *.js, *.userscript.js) and all of our learnings from above in this thread. 
-
-### *.md
-Re-read the legacy markdown docs
-Our older markdown files (moved to a new subdirectory): 
-* docs/notes/amazon/coding/AMAZON_IMAGE_URL_ANATOMY.md
-* docs/notes/amazon/coding/AMAZON_SCRATCHPAD.md
-* docs/notes/amazon/coding/AMAZON_URL_ANATOMY.md
-* docs/notes/amazon/coding/AMAZON_URL_MINED_QUERY_PARAMETERS.md
-
-Re-read the 3 markdown docs that were created eariler in this thread, prefereing this as a data source where there are conflicts with the above
-* docs/notes/amazon_url/AMAZON_PRODUCT_SCRAPING_GUIDE.md
-* docs/notes/amazon_url/AMAZON_URL_REFERENCE.md
-* docs/notes/amazon_url/AMAZON_IMAGE_URL_REFERENCE.md
-
-An re-read these scripts (which will be updated to use this "amazon toolkit" in the near future)
-* `docs/references/amazon_fetch/amazon_tools2.js`
-* `markdown_linker/markdown_linker.user.js`
-
-## Implementation
-* The implementaiton doesn't need to be called "amazon toolkit"; Choose a name that follows typical JavaScript conventions
-* Write the new "amazon toolkit" files under the newly created dir: `amazon_toolkit/**`, which you can rename to reflect ^.
-* Do not simply copy/paste the code from existing scripts as that code may not be compaitble, may be buggy, and does not follow the conventions outlined in AI instructions.  
-    * Analyze each dataSource (listed below), ensure that all code conforms to the AI instructions. 
-
-* DO NOT modify any other files during this phase, only write our new toolkit code and (if helpful) a markdown to reflect what's done and what's left to do. 
-### NameSpaces
-I think it is wise to design this "toolkit" with what I'm going to call namespaces. Here is very rough idea. 
-* amazon_toolkit/product_extractor
-* amazon_toolkit/store_extractor
-* amazon_toolkit/url_toolbox - funtions that take in data structs from:
-    * product_extractor
-    * store_extractor
-    * html anchors (this refers what we currently do in "opt+z+click" on anchor)
-
-let's explore this idea. Ask me questions
-
----
-
-<!-- I mentioned this eariler, but let's consider building an amazon toolkit (a class maybe?). 
-
-* This amazon toolkit file shoudl follow all instructions defined in `.github/instructions/userscript-conventions.instructions.md` (read it in full, then apply during write)
-* Should be a separate/importable file that we can use from `markdown_linker.user.js` (don't modify that file at this time) and from other userscripts in the future. 
-* Refactor the amazon utilities found in `docs/references/amazon_url_miner_node/amazon_tools.js`, 
-* Add functions to cover the amazon related stuff from our user scirpt. 
-
-The public API should have support for everything amazon related in both of these current scripts:
-* `docs/references/amazon_url_miner_node/amazon_tools.js`
-* `markdown_linker/markdown_linker.user.js`
-
-Let's stirctkly focus on creating that amazon toolkit. Do not modify these files right now. Do read them though. 
-* `docs/references/amazon_url_miner_node/amazon_tools.js`
-* `markdown_linker/markdown_linker.user.js`
-* any other pre-exising *.js file
-Do not simply copy/paste the code. Analyze each piece, rewrite it according to the AI instructions. 
- -->
-
-
 
 
 
 ---
 
-1. sure, let's start with that. Though there will be more shortening to do later
-2. `/dp/{ASIN}` or one of the other 2 bare formats according to `## Product URLs` in `docs/notes/amazon/AMAZON_URL_ANATOMY.md`. 
-
-
----
-
-
-I was expecting that these files would contain classes (or most of them would). 
-* Is there a reasoning behind using just a loose collection of functions? 
-* What would consumer code look like? Are these function nested under some namespace when they are called? 
-Let's discuss the pros/cons of such an architecture. 
-* how does public/internal/private scoping work here? I didn't see any of those keywords used. Are they not supported?
-
-Let's discuss writing tests for the amazon and userscript_common libraries. I can provide raw product source code (as files). 
-* What else would you need from me? 
-* how to structure tests for this kind of environment?
-* what does the dir hierarchy look like?
-
-I do have some more things to talk about but lets' cover these two first. 
-
-
-why is `function extractASIN(doc, url)` in shared_extractor? (and similar question for other product related functions) It's product releated and I would think goes in product_extractor (maybe I'm wrong and it's )
- If these functions remain in share_extractor the I ask that you be more specific with function names. Here are a few examples:
-    * function extractASIN(doc, url) -> function extractProductASIN(doc, url)
-    * function extractTitle(doc) -> function extractProductTitle(doc)
-    * function extractBrand(doc) -> function extractProductBrand(doc)
-In fact update functions names in all cases where the filename isn't descriptive enough
-
-
-* I feel like `dom_helpers.js` and `logging_helpers.js` are not amazon specific and could be very useful for future userscripts that are written in this repo (since AI instruction will always call for these thing). We should move these to their own "library". I already made a directory for it: `userscript_common`
-
---- 
-
-I'd prefer that test reside in in the same folder as what they are testing (vs all tests gatherd together under the same dir) > What are some pros/cons?
+<!-- 
+I'd prefer that test reside in in the same folder as what they are testing (vs all tests gatherd together under the same dir) > What are some pros/cons? 
+-->
 
 
 
 
 --- 
-
+<!-- 
 
 # Link formatting
 ```zsh
@@ -764,11 +515,11 @@ extension [String] {
 
 * `https://cli.github.com/).` => [GitHub: GH CLI](https://cli.github.com/). 
 * `https://cli.github.com/manual/gh_api` => [GitHub: GH CLI Manual](https://cli.github.com/manual/gh_api)
-
+ -->
 
 ---
 
-
+<!-- 
 Let;s explore adding some ViolentMonkey preferences for this script\x1B[1m
 I'd like to start with something small/easy like what which format is used for the `alt+z+click`
 
@@ -785,3 +536,9 @@ What will this look like? What will this add to the code? Any unforseen conseque
 
 URL: [GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
 LRU: [GitHub: Mobile - Hatch Baby](https://github.com/hatch-baby/mobile)
+ -->
+
+
+---
+
+
