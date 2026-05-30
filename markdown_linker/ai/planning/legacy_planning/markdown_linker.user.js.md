@@ -1,0 +1,544 @@
+
+
+
+
+
+----
+
+
+
+# TODOs
+* [ ] p1 - additional modifier key to control leading `* ` in markdown list output
+
+# IDEAS
+
+
+## Youtube Link Formatting
+
+### youtube.com/watch?v=
+For urls that begin with `youtube.com/watch?v=` use `page` format, but performe some additional clean up:
+* [ ] Remove the leading number in parenthesis (if exists)? Regex: `^\(\d+\) `
+* [ ] Remove suffix: ` - Youtube`
+* [ ] Add new prefix: `Youtube: `
+Examples: 
+* Actual: `(42) How a YouTuber SOLVED a 67-Year Cold Case Police Called "Impossible" - YouTube`
+* Expected: `How a YouTuber SOLVED a 67-Year Cold Case Police Called "Impossible"`
+
+* [Portland / Columbia River](https://www.youtube.com/watch?v=9tEIBj4f378)
+
+Implementation notes:
+- `document.title` already contains the noisy prefix/suffix, so run the cleanup regex chain before applying the `Youtube: ` prefix.
+- When the DOM exposes `<meta property="og:title">`, prefer that value because it usually omits notification counters.
+- Keep fallbacks predictable: cleaned page title → anchor text → auto-generated domain-based title.
+
+### channel title
+* desired format for videos: `Youtube: <channel_name> - <video_title>`
+* desired format for videos: `Youtube: PSVR2 Without Parole - PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!">PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!`
+
+**Example**
+Youtube video: `https://www.youtube.com/watch?v=LI6OhRtqyXw`
+
+channel_name: `PSVR2 Without Parole`
+```html
+<a class="yt-simple-endpoint style-scope yt-formatted-string" spellcheck="false" href="/@WithoutParole">PSVR2 Without Parole</a>
+```
+
+video_title: PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!
+```html
+<yt-formatted-string force-default-style="" class="style-scope ytd-watch-metadata" title="PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!">PSVR2 THIS WEEK | November 9, 2025 | Lumines: Arise, Hotel Infinity, Audio Trip, DLC, VRGS &amp; More!</yt-formatted-string>
+```
+
+Implementation notes:
+- Channel name lives under `#owner` (desktop) or `.ytd-channel-name` anchors. Query all obvious selectors, trim whitespace, and cache the first non-empty value.
+- Video titles surface via `meta[property="og:title"]`, `#title yt-formatted-string`, or the `ytd-watch-metadata` block—read them in that order.
+- If either lookup fails, fall back to the cleaned `youtube.com/watch?v=` formatting so menu entries stay deterministic.
+
+
+### timestamped url
+* For popup menu on youtube video, try to add entry for timestamped URL
+  * url: `https://www.youtube.com/watch?v=LI6OhRtqyXw`
+  * timestamped url (short): `https://youtu.be/LI6OhRtqyXw?t=283`
+  * timestamped url (seconds): `https://youtu.be/LI6OhRtqyXw?t=283s`
+  * timestamped url (minutes, seconds): `https://youtu.be/LI6OhRtqyXw?t=4m43s`
+* the youtube player has a context menu: `Copy video URL at current time`
+* Maybe we can read the elapsed of the video player to compose a url ourselves
+
+Implementation notes:
+- The primary `<video>` element exposes `currentTime` (seconds). Read it via `document.querySelector('video')?.currentTime` when the page is active.
+- Derive variants from the same number: raw seconds (`?t=283`), suffixed seconds (`?t=283s`), or human-readable `?t=4m43s` by converting with integer division/modulo.
+- Prefer the short `youtu.be/<id>` domain for timestamped entries so links stay compact.
+
+### youtube_toolkit
+Create a sibling toolkit (similar to `common/amazon_toolkit`) dedicated to ![youtube](../docs/images/icons/youtube.png) `YouTube` page analysis. Goals:
+
+- **Compatibility**: Every extractor accepts either a live browser `document` or a jsdom document so the toolkit works in both the userscript and Node-based test harnesses.
+- **Folder layout**:
+  - `youtube_toolkit/extractors/video_extractor.js` — normalize video metadata (title, description, duration, current playback time, canonical URL, and JSON-LD fallbacks).
+  - `youtube_toolkit/extractors/channel_extractor.js` — pull channel name, handle, avatar URL, badge state, subscriber counts, etc.
+  - `youtube_toolkit/extractors/playlist_extractor.js` — read playlist title plus the ordered list of constituent videos (id, title, duration, channel) so consumers can build markdown lists.
+  - `youtube_toolkit/extractors/page_state_extractor.js` — classify whether the DOM represents a watch page, playlist page, channel landing, shorts, or other surfaces.
+  - `youtube_toolkit/helpers/time_helpers.js` — convert seconds ↔︎ `XmYs`, guard against NaN, and format timestamps for menu labels.
+  - `youtube_toolkit/helpers/dom_helpers.js` — resilient selector wrappers (shadow DOM safe queries, attribute normalization) to shield consumers from small markup changes.
+  - `youtube_toolkit/index.js` — aggregate exports so downstream code can `require('youtube_toolkit').videoExtractor`, mirroring the Amazon toolkit pattern (CommonJS modules for consistency).
+- **Playlist feature (MVP)**:
+  - On Opt+Click, if the anchor or current page references a playlist, offer a “Playlist → Markdown List” option that renders each video as `* [Title](URL)` using the extractor data.
+  - Ensure extractor exposes enough metadata for additional formatting (channel name per video, durations, etc.) even if the initial UI only needs titles + URLs.
+- **Watch page feature (MVP)**:
+  - Provide helpers for `channel_name`, `video_title`, and `currentTime` so the userscript can offer the `Youtube: Channel - Title` format plus timestamped link variants.
+- **Future ideas (not in first cut)**:
+  - Channel landing pages → enumerate featured playlists and return a structured list (useful for future Opt+Click actions that dump curated playlist collections).
+  - Notification/inbox counts or live stream metadata if we ever need them.
+
+Integration notes for `markdown_linker`:
+- Detect ![youtube](../docs/images/icons/youtube.png) `YouTube` watch/playlist pages via `page_state_extractor`.
+- If on a watch page, automatically add menu entries for channel-format links and timestamped variants (only show timestamp rows when `currentTime > 0`).
+- If the target is a playlist URL, add menu entries to output markdown lists (single block or copy-to-clipboard) using the playlist extractor payload.
+
+Edge cases to consider:
+- Start playback detection: timestamp options should be hidden/disabled when the `<video>` element is paused at `0` or absent (e.g., background tab, playlist preview mode).
+- Signed-out vs signed-in DOM: selectors should degrade gracefully (especially for channel headers/subscriber counts).
+
+## Special formatting for GitHub links
+
+Format for github `repo` urls:
+Build the link title for github `repo` urls like so:
+
+* Prefix: `GitHub: `
+* if url contains owner and repo: `$owner/$repo`
+* If only owner: `$owner`
+
+Current Output
+* [Hatch Baby](https://github.com/hatch-baby)
+* [mobile](https://github.com/hatch-baby/mobile)
+* [hatch-next](https://github.com/hatch-baby/hatch-next)
+* [rest_plus](https://github.com/hatch-baby/rest_plus)
+
+Desired Output
+* [GitHub: hatch-baby](https://github.com/hatch-baby)
+* [GitHub: hatch-baby/mobile](https://github.com/hatch-baby/mobile)
+* [GitHub: hatch-baby/hatch-next](https://github.com/hatch-baby/hatch-next)
+* [GitHub: hatch-baby/rest_plus](https://github.com/hatch-baby/rest_plus)
+
+## Special formatting for Jira Issues
+
+
+### From "P0" view
+aka [P0 keyword](https://hatchbaby.atlassian.net/jira/software/c/projects/HSD/boards/79?assignee=557058%3Ab7e93ab1-1843-4e8c-994e-9ba18eab389e)
+
+
+Mining the jira card (for `HSD-14917` in this example)
+
+
+Card (HSD-14917)
+* `Outer HTML` for the card: <div class="css-1qyv5a"><div class="css-1kotxvd"><div class="_vchhusvi _1e0c1txw _2lx21bp4 _ca0qutpp _u5f3utpp _n3tdutpp _19bvutpp _7y2iu2gc _12tyidpf _pg611b66 yse7za_content"><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section"><div role="presentation"><span class="_slp31hna _1i4q1hna _1nmz1hna _u5f3xy5q _1yyj11wp _1e0ccj1k _1reo15vq _18m915vq _sudp1e54 yse7za_summary">[IoTShadowClient] Remove memberId from API interface, obtain from UserDefaults</span></div></div><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section"><div class="css-1a6b7sz"><div role="presentation" class="_p12f1osq"><span class="_p12f1osq _1e0c1txw _1bah1y6m _4cvr1h6o _13t37vkz"><span style="color: var(--ds-text-inverse, #FFFFFF); background-color: var(--ds-background-accent-orange-bolder, #C25100); --darkreader-inline-color: var(--darkreader-text--ds-text-inverse, var(--darkreader-text-ffffff, #d4d3d0)); --darkreader-inline-bgcolor: var(--darkreader-bg--ds-background-accent-orange-bolder, var(--darkreader-background-c25100, #98511f));" class="_2rkofajl _11c81o8v _p12f1osq _k48pmoej _1p1dangw" data-darkreader-inline-color="" data-darkreader-inline-bgcolor=""><span class="_1reo15vq _18m915vq _1e0c1o8l _1bto1l2s _s7n4jp4b _o5721q9c _vchhusvi _p12f1osq _ca0qidpf _u5f31b66 _n3tdidpf _19bv1b66">[iOS] Connectivity Rewrite - IoT</span></span></span></div></div></div><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section"><div data-testid="platform-card.common.ui.custom-fields.custom-card-field-list" class="_zulp1b66 _1bsb1osq _p12f1osq _1e0c1txw _2lx21bp4 yse7za_customCardFieldList"><div role="presentation"><div><div data-testid="platform-card.common.ui.custom-fields.card-custom-field.text-card-custom-field-content.field" class="_1reo15vq _18m915vq _o5721q9c _p12f1osq _2hwx1wug _1bto1l2s _syaz1gjq _1bsk1osq _1y8m1wug _1maq1b66 _14991b66 _w9a21wug _bbhg1wug _1rjkglyw _1rxbnkob _1jbznkob _umv415vq _wwzv15vq _w77h1osq _5rkt1l2s _1suh1wug _xnkt1wug _rtysuuw1 _19l353f4 _1md0idpf _qehnidpf _18vridpf _1nlwidpf _12isidpf _ql9ct94y _1ci4idpf _1qwe1ule _1npa1y44 _pokj1osq _gzx61wug _knrj1l7b _1urb1y44 _7998idpf _18pvidpf _11o7idpf _17l5idpf _1mmrt94y _zg8l1kw7 _tzy4kb7n _lcxv1wug">iOS</div></div></div></div></div><div class="css-e3hw33" data-component-selector="platform-card.ui.card.card-content.content-section" data-testid="platform-card.ui.card.card-content.footer"><div class="_zulpoqx6 _1e0c11p5 _1bsb1osq _1tke1f4h _2z05hkll _yv0e1xhj _1lmc6ou8 yse7za_footer" style="--_1rr33ui: &quot;yse7za_primary yse7za_tertiary yse7za_secondary&quot;;"><div class="_nd5lkgrd _zulp1b66 _p12f1ns9 _vchhusvi _1e0c11p5 _wij21bp4 _4cvr1h6o _1bahv2br yse7za_footerChildSection" style="--_yr074y: yse7za_primary;"><div class="_1e0c1txw _1bah1h6o _2lx21bp4"><div role="presentation"><img alt="Task" src="https://hatchbaby.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium" class="_1bsb7vkz _4t3i7vkz _s7n41ndm"></div></div><div data-testid="platform-card.common.ui.key.key" class="_16jlidpf _1o9zkb7n _i0dl1wug _1reo15vq _18m915vq _1eim1xrj _o5721q9c _1e385e4z"><a href="/browse/HSD-14917" target="_blank" class="_uizt1wug _syaz1gjq _4bfu18uv _1hmsglyw _ajmmnqa1 _1nrm18uv _1a3b18uv _9oik18uv _5bd618uv _1ydc18uv _c2waglyw _4fprglyw _1bnxglyw _13jxglyw _1x28glyw _1iohnqa1 _5goinqa1 _jf4cnqa1 _xatrnqa1 _1726nqa1"><div class="css-16l5nyr">HSD-14917</div></a></div></div><div class="yse7za_footerChildSection sc-1e1lt9n-4 ilMEXN"><div class="_vchhusvi _1e0c1txw _1bah1b1v _4cvr1h6o _1nvfidpf _1nei1b66 _rt2pidpf _bmksidpf _fhioidpf"><div class="_1e0c1txw _2lx21bp4 _1bah1h6o"><span role="presentation" data-testid="development-board-dev-info-icon.container"><button aria-expanded="false" aria-haspopup="true" aria-describedby="development-board-dev-info-icon.button-text-67222" class="css-z7eb04" tabindex="0" type="button"><span class="css-bwxjrz"><span role="img" aria-label="pull request" style="color: var(--ds-icon, #44546F); --darkreader-inline-color: var(--darkreader-text--ds-icon, var(--darkreader-text-44546f, #99a8b7));" class="_1e0c1o8l _vchhusvi _1o9zidpf _vwz4kb7n _y4ti1igz _bozg1mb9 _12va18uv _jcxd1r8n" data-darkreader-inline-color=""><svg fill="none" viewBox="0 0 16 16" role="presentation" class="_1reo15vq _18m915vq _syaz1r31 _lcxvglyw _s7n4yfq0 _vc881r31 _1bsbpxbi _4t3ipxbi"><path fill="currentcolor" fill-rule="evenodd" d="M4.25 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5M2 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 2 3.25m6-.75h1.75a2.75 2.75 0 0 1 2.75 2.75v5.378a2.251 2.251 0 1 1-1.5 0V5.25C11 4.56 10.44 4 9.75 4H8zM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5m7.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5" clip-rule="evenodd" style="--darkreader-inline-fill: currentcolor;" data-darkreader-inline-fill=""></path></svg></span></span></button><span id="development-board-dev-info-icon.button-text-67222" class="_1e0cglyw">Select to open pull request details.</span></span></div><div role="presentation"><div role="tooltip" aria-label="2 days in this column" tabindex="0" class="_zulpv77o _4t3i1osq _1e0c1txw _4cvr1h6o _1bah1h6o"><div color="var(--ds-icon-accent-gray, #758195)" style="--_xexnhp: var(--ds-icon-accent-gray, #758195); --darkreader-inline-color: var(--darkreader-text--ds-icon-accent-gray, var(--darkreader-text-758195, #989187)); --darkreader-bg--_xexnhp: var(--darkreader-bg--ds-icon-accent-gray, var(--darkreader-background-758195, #626976)); --darkreader-text--_xexnhp: var(--darkreader-text--ds-icon-accent-gray, var(--darkreader-text-758195, #989187)); --darkreader-border--_xexnhp: var(--darkreader-border--ds-icon-accent-gray, var(--darkreader-border-758195, #5f6467));" class="_2rko1rr0 _bfhk1cj8 _1bsbi2wt _4t3ii2wt" data-darkreader-inline-color=""></div><div color="var(--ds-icon-subtle, #626F86)" style="--_xexnhp: var(--ds-icon-subtle, #626F86); --darkreader-inline-color: var(--darkreader-text--ds-icon-subtle, var(--darkreader-text-626f86, #9b948b)); --darkreader-bg--_xexnhp: var(--darkreader-bg--ds-icon-subtle, var(--darkreader-background-626f86, #5c6472)); --darkreader-text--_xexnhp: var(--darkreader-text--ds-icon-subtle, var(--darkreader-text-626f86, #9b948b)); --darkreader-border--_xexnhp: var(--darkreader-border--ds-icon-subtle, var(--darkreader-border-626f86, #6e6960));" class="_2rko1rr0 _bfhk1cj8 _1bsbi2wt _4t3ii2wt" data-darkreader-inline-color=""></div></div></div><div data-testid="platform-card.common.ui.priority.icon" class="_1e0c1txw _1bah1h6o _4cvr1h6o"><div role="presentation"><img alt="Medium priority" src="/images/icons/priorities/medium_new.svg" class="_1bsb7vkz _4t3i7vkz _s7n41ndm"></div></div></div></div><div class="sc-1e1lt9n-3 clxNWt"><div class="css-6cu6fo"><div data-testid="software-board.board-container.board.card-container.card.assignee-field.button" class="_80omtlke _1gp47079 _1di411wp _lcxvglyw"><div class="css-ipsdmm"><button class="sc-1nlgjye-1 brTUJl" data-testid="issue-field-assignee.ui.popover.edit-view.test" data-aui-bypass-blur-on-esc-keyup=""><div class="_ca0qidpf _u5f3idpf _n3tdidpf _19bvidpf _1bsb1f4h _4t3i1f4h _vchhusvi _80om73ad"><div role="presentation"><div data-testid="issue-field-assignee.common.ui.read-view.popover.avatar" role="img" aria-labelledby="_rl7_" class="_12ji1r31 _1qu2glyw _12y3idpf _1e0c1o8l _kqswh2mm"><span style="--avatar-bg-color: transparent; --avatar-box-shadow: 0 0 0 2px transparent; --darkreader-bg--avatar-bg-color: var(--darkreader-background-00000000, rgba(31, 31, 31, 0)); --darkreader-bg--avatar-box-shadow: 0 0 0 2px transparent;" data-testid="issue-field-assignee.common.ui.read-view.popover.avatar--inner" class="_vchh18uv _bfhkcxp3 _16qs1nhn _19itglyw _12ji1r31 _1qu2glyw _12y31o36 _1reo15vq _18m915vq _v564ieh6 _1e0c1txw _kqswpfqs _4cvr1fhb _1bah1h6o _2lx21bp4 _80om1kw7 _6rthv77o _1pfhv77o _12l2v77o _ahbqv77o _85i5ze3t _1q51ze3t _y4tize3t _bozgze3t _t9ec1aqe _9v7aze3t _qc5o1p41 _z0ai1osq _18postnw _1hfk18uv _aetrf705 _1peqidpf _11fnglyw _1ejjglyw _mizu194a _1ah3v77o _ra3xnqa1 _128mdkaa _4dave4h9 _2rko1qll _14mj1qll _1bsb1tcg _4t3i1tcg"><img src="https://secure.gravatar.com/avatar/a36e081c75729b24b7d1a578d40d241b?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FZH-4.png" alt="" data-testid="issue-field-assignee.common.ui.read-view.popover.avatar--image" aria-hidden="true" data-vc="issue-field-assignee.common.ui.read-view.popover.avatar--image" data-ssr-placeholder-ignored="true" class="_16jlkb7n _1o9zkb7n _i0dl1osq _1e0c1txw _1bsb1osq _4t3i1osq _2rko1rr0"></span><span data-testid="issue-field-assignee.common.ui.read-view.popover.avatar--label" id="_rl7_" hidden="">Assignee: Zakk Hoyt</span></div></div></div></button></div></div></div></div></div></div></div></div></div>
+* The "Card Title" is in this card's `Outer HTML`: `Remove memberId from API interface, obtain from UserDefaults`
+
+---
+
+<!-- 
+
+Create a violentmonkey script that can create a markdown link from any HTML anchor (`<a>`) in the web page with varying title data sources. 
+
+Script filepath: `/Users/zakkhoyt/code/repositories/z2k/github/greasemonkey/markdown_linker/markdown_linker.js` (there is minor boilerplate there now.)
+
+
+
+Both the html anchor (`<a href=$url>title</a>`) and the markdown link (`[title]($url)`) are composed with
+* a `url`: any `https://...` and a few other schemes like `ftp://`, `file://`, `ssh://`, etc...
+* a `title`: a human readable description
+
+# Browser and Extension Support
+* Initially I want this script to work for my personal setup: `macOS 26.1 Beta (25B5042k)`, `Firefox 144.0.2`, `violentmonkey 2.31.0`
+
+# Script inputs
+The script will need at least 2 pieces of input data: A `URL` and a `title`
+
+## URL
+For the URL I would like to support both:
+* Any HTML anchor displayed in the current web page
+* The URL of the current web page 
+
+## Title
+For the title I'd like for the user to be able to specify from a few different data sources
+* If the user has highlighted any text on the current web page, prefer that for the title. I"m not sure if that's possible, but let's check the violentmonkey API docs
+* The value of the the HTML anchor. EX: `<a href="https://....">MY TITLE</a>`
+* Ideally the user could right click (aka context click) on any HTML anchor then trigger the script there. Aslo would liek to be able to use URL of the current web page as a data source
+
+
+# Invoking the Script
+For the script input case of HTML anchors, the user needs to be able to specify. Ideally I'd like the user to be able to right click on an anchor then select "Create Markdown Link" (possibly with a submenu to specify what to use for the title). 
+
+For the script input case of using the current webpage's URL. Again, ideally right clicking on the page in general (not on an anchor) could contain a similar menu (possibly with a submenu to specify what to use for the title). 
+
+
+## Fallbacks
+I'm not sure if this browser context menu idea is possible within the security limitations of Firefox and ViolentMonkey. Please check the documentation of both. 
+
+Preferences
+1) Browser Context Menu 
+2) HTML popup menu of some sort (maybe `cmd+click`, `opt+click` or something like that. Some key/mouse combo that's not already taken
+3) A sibling HTML element. We could add a button or something before/after/above/below each anchor on the page. This is lease desirable for a number of reasons
+
+## Current Firefox Behavior
+Currently when I right click on an anchor in firefox, this is the context menu that I see (no `violentmonkey` stuff in here).
+![Firefox_anchor_context_menu](images/Firefox_anchor_context_menu.png)
+
+
+
+# Script Output
+Now that the script has both pieces of input, it's easy to create a markdown link, 
+
+Always print the output/markdown to the console logs like so (in a single log call)
+1. title 
+2. html anchor 
+3. markdown output
+
+
+How should the script hand that markdown link over to the user?
+
+1. To start with let's write it to the system's pasteboard/clipboard. I'm quite certian that violentmonkey has an API for this. 
+
+
+# Other
+The starting script has a ViolentMonkey header, but I think the sytnax is pretty dated (based off of an old example). Let's update this to replace any deprecated our outdated syntax. Ask me
+
+
+# Scripting References
+* Find other scripts to use as references `/Users/zakkhoyt/code/repositories/z2k/github/greasemonkey/**/*.js`
+
+# References
+Read / mine these web pages for documentation (and any others you see fit)
+* [violentmonkey](https://violentmonkey.github.io/)
+* [GitHub: violentmonkey](https://github.com/violentmonkey/violentmonkey)
+* [violentmonkey scripts](https://github.com/ja-ka/violentmonkey)
+* [Using Modern JS Syntax](https://violentmonkey.github.io/guide/using-modern-syntax/)
+* [Violentmonkey (GM functions)](https://violentmonkey.github.io/api/gm/)
+
+
+
+
+Please summarize the plan and ask me to confirm, fill in details, etc... Ask me questions along the way if things are unclear or if there are alternate possibilities. 
+
+
+--- 
+
+Add logging throughout. `trace` style.
+
+# Formatting
+* put back let logBase = "MD_URL".
+* prefex every console write logBase. EX: console.log('${logBase}: begin script');
+  * perhaps a wrapper function is appropriate?
+
+# Occurrence
+* first line of each function (begin $function_name)
+* last line of each function (end $function_name)
+* before each "task". EX: "Will read clipboard"
+* after each "task". Include task output if convenient. EX: "Did read clipboard: 'abc123'"
+
+
+Summarize before updating
+
+---
+
+Add succinct comments throughout. Format the comments for the perspective of a seasoned developer who is learning javascript, html, and violent as tertiary languages. Include references to documentation where applicable (javascript, html, violentmonkey, css, and firefox)
+
+Prefer `mozilla` documentation where available and sufficient, but fall back to other vendors as appropriate. 
+* [html example](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/details#creating_an_open_disclosure_box)
+* [javascript example](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array)
+
+
+Action Items
+* Add a header comment (after `// ==/UserScript==`) 
+* Add a function comment to each function in the file
+* Anywhere else that could be tricky, or works around some problem, there is a lesson to be learned, etc...
+```
+
+
+ -->
+
+
+
+---
+
+
+
+
+# Secondary Goals
+<!--
+* [X] ~~*clean up the url. Extract info from script to form a full URL if javascript is involved. Avoid redirects.*~~ [2025-11-01] 
+* [X] ~~*URL shortening (esp amazong)*~~ [2025-11-01]
+* [X] ~~*all on page (indented)*~~ [2025-11-01]
+* [X] ~~*all on page (outdented)*~~ [2025-11-01]
+-->
+
+<!--
+* [X] ~~*if our isDebug flag == true, when writing each console log also write it to some local file, on disk, where you have access to read it.*~~ [2025-11-02] 
+  * Be sure to use proper timestamping for each log line. 
+  * We could even write a new log file each session (timestamped of course)
+  * Maybe `/tmp/userscripts/markdown_linker/logs/markdown_linker_${timestamp}.log`
+-->
+
+<!--
+* [X] ~~*let's make `opt+z+click` (either on a anchor or off of a anchor) to automatically infer the title in this order:*~~ [2025-11-03]
+  * selected text
+  * anchor title
+-->
+
+<!--
+* [X] ~~*For the opt+z+click scenario, I'd like some visualt feedback  on each click. Like a little click animation*~~ [2025-11-03]
+-->
+* [ ] success banner should preview the output (1 line truncated)
+* [ ] let's add a preference (using violentmonkey API) to let the user define their own "key shortcuts"
+    * use the current as default values
+    * let the user type in the keyboard short cut keys for both functions
+* [ ] let's add a preference (using violentmonkey API) for popup menu scaling. 
+    * allow a value from 0.5 ... 3.0
+    * The default value should be 1.0. and 1.0 should equal the current css & size setttings 
+    * the preference value should be some factor to apply to those css values
+    * If we can use a slider that would probably be ideal, but we can work with other UI controls as well
+
+    * hotkey modifier
+
+
+* [ ] dedicated hotkey to infer title source (no menu prompt)
+    * selected text -> anchor title
+
+* [ ] image links (click only)
+* [ ] hotkey glyphs in menu
+* [ ] normalize list indenting
+* [ ] filtering nonsense urls
+* [ ] additional title dataSource: Infer from url
+    * domain: last path component (sentence case)
+    * github specific
+* [ ] inputs: add "From Clipboard" if the clipboard has appropriate content
+* [ ] output format (single, list)
+
+* [ ] After the implementation goals are met, it would be nice if this script could work for similar extensions (like `greasemonkey`), more browsers, etc...
+
+
+
+<!-- 
+
+# amazon
+
+There are few things to address regarding amazon. Before getting into details I dug up some documentations and reference code regarding amazon URLS
+* I've added some notes about amazon URL anatomy, etc..: Please read all files here: `docs/notes/amazon/*`
+* I've also added some useful amazon url breakdown/composition code under: `docs/references/amazon_fetch/**/*`
+* lastly there might be some useful amazon url related code under: `amazon_item_blocker/**/*`
+
+## Shorter Link Titles for amazon
+* shorter titles for amazon products. The titles are much longer than I'd like
+    * Remove things like: ' at Amazon Women’s Clothing store'
+    
+EX:
+* URL: https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DFB9X382/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1
+* current result: [Xiaoxuemeng Womens Baggy Wide Leg Pants Casual Elastic Waisted Palazzo Harem Pants with Pockets(Coffee-S) at Amazon Women’s Clothing store](https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DFB9X382/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1)
+* a bit shorter: [Xiaoxuemeng Womens Baggy Wide Leg Pants Casual Elastic Waisted Palazzo Harem Pants with Pockets(Coffee-S)](https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DFB9X382/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1)
+* even shorter: [Xiaoxuemeng Womens Baggy Wide Leg Pants (Coffee-S)](https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DFB9X382/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1)
+
+
+## amazon urls can be shorter
+The URLS that this script is generating are 
+EX: 
+* This url was output by the current userscript : https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DFB9X382/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1
+* IT can def be shortened to this: https://www.amazon.com/dp/B0DFB9X382?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1
+
+
+## More specific urls / query parameters for amazon
+* When taking link for the current page on amazon sites, products that have color selection, size selection, etc.. the URL doesn't seem to reflect that. We do want to remove tracker information and all unecessary query params, but  we also want to keep size/color type query params. 
+
+EX: 
+Maybe this example doesn't actually have different query parameters. 
+* URL: https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DFB9X382/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1
+* coffee, x-small: [Xiaoxuemeng Womens Baggy Wide Leg Pants Casual Elastic Waisted Palazzo Harem Pants with Pockets(Coffee-S) at Amazon Women’s Clothing store](https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DJ75BM9M/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1)
+* beige, large:    [Xiaoxuemeng Womens Baggy Wide Leg Pants Casual Elastic Waisted Palazzo Harem Pants with Pockets(Coffee-S) at Amazon Women’s Clothing store](https://www.amazon.com/Xiaoxuemeng-Elastic-Waisted-Palazzo-Coffee-S/dp/B0DYNQ33HB/?_encoding=UTF8&content-id=amzn1.sym.cd409af6-99ed-4f1e-ade0-2d3b4623bec0&th=1&psc=1)
+
+
+## Other. 
+
+It might be worth starting to build an amazon_url type class/file at this point since the script is getting pretty big and these changes are just for amazon. 
+
+---
+
+Let's pause here for a moment and do some work in `docs/notes/amazon/AMAZON_URL_QUERY_PARAMETERS.md`. For each list item in `# Mined query parameters`, provide a defintion for what the query parameter means. Consult amazon docs and also coding / hacking websites. I found I had to look at both 
+
+
+Do not delete any list items, only add definitions to them (along with a reference link where you found the data. )
+
+---
+Next, let's create a 3rd markdown document in that directory about how to scrape product, variant, and image data from the HTML source code of a product. 
+
+Basically detail what this javascript file does: `docs/references/amazon_url_miner_node/amazon_tools.js`, 
+but also keep in mind the two *.md files that we just wrote based off of research (`docs/notes/amazon_url/*.md`)
+
+
+BTW this script is what calls `amazon_tools.js`, but it's not very relevant:`docs/references/amazon_url_miner_node/fetch_html.js`
+
+After reading all of those files, write a 3rd file under `docs/notes/amazon_url` that details how to: 
+* generate a markdown link to that product
+    * title: How to scrape and prepare a title for the link that is succinct yet still descriptive
+        * several data sources for the title
+    * url: 
+        * How to build a product URL that is as short as possible 
+        * how to retain product variant selection in the URL (size, color, etc..)
+* generate a markdown image link to an image of that product product
+    * How to find/scrape the image identifier (not the same as ASIN)
+    * how to compose an image URL
+    * how to create variants of the image url (different sizes for example)
+* Any other functions or procedures not mentioned here. 
+
+
+One more ask: Please research if there are other/supported/easier ways to do things that `amazon_tools.js` does. If so, let's discuss first. 
+
+Ask me any question along the way. Summarize before writing.  -->
+
+--- ---
+
+
+
+---
+
+<!-- 
+I'd prefer that test reside in in the same folder as what they are testing (vs all tests gatherd together under the same dir) > What are some pros/cons? 
+-->
+
+
+
+
+--- 
+<!-- 
+
+# Link formatting
+```zsh
+# if 0 path components
+"[${domain_title}]($url)"
+
+# if only 1 path component
+"[${domain_title}: ${paths_components[1]}]($url)"
+
+# if >= 2 path components 
+"[${domain_title}: ${paths_components[1]} - ${paths_components[2]}]($url)"
+# # Some domains might yeild a better title working the path components from back to front
+# # TODO: list example domains
+# "[${domain_title}: ${paths_components[n-1]} - ${paths_components[n-2]}]($url)"
+```
+* clean_domain_name: 
+  * To lean up domain names we will just use the domain name mostly as is
+    * Drop the leading `www.`
+    * EX: `https://www.amazon.com/Atlantic-Salmon-Portion-Center-Cut/dp/B09Y5W11J1?sr=8-1`
+      * `amazon.com` 
+    * EX: `https://github.com/hatch-baby/mobile`
+      * `github.com` 
+    * EX: `https://docs.github.com/en/rest/guides/scripting-with-the-rest-api-and-javascript`
+      * `docs.github.com`
+      * `GitHub Docs`
+    * EX: `https://docs.google.com/accounts/SetOSID?authuser=0&continue=https://docs.google.com/document/d/1O2y-zlIm5kCagM_PhlvJizF3Puj-mvJruM0P964UirQ/edit?tab%253Dt.bxh44nhlto8v%2526pli%253D1%2526authuser%253D0%26osidt%3DALWU2ctmBV_szULAjQy0WbjdLT6nKLUpDXviJvTHBTw0KIECHhYNZdhuOSSxmgd6Ev_WLZSV2IeStkdg4E0zg8nbydQbIup-uPQhNf7HJJqsf_7VVOql_0v4XiWuTeV5opa77htweLIJ6fpmldVYqlfet46lx7fQD3HezBqZO0TAPfJvEhlQKV2aifkb4YGIjH3Unys-BkY5Q4nkjnUWkpKNmJDsRnNJ81XdHriQNwglTrF-gyjCZ6cvEAocmg2d82uz9r6xsKkgBBHr_hlQ9LE_9l6VHQTrLQTKsTbpx6UgbKLWODxwyFaQhGr0wjOQFqomTAaEf9v5aOyq8-3KrITGklFiER-LOWuE7HvBH4o0_ZrI0-h96qpVksz98RIh1qNi2BIoHtMLsQlvYteUCBKIQxJc62i-TaUHQNGJBzVzUoC7AR-t9HOsgjHG19mv9Uhjr3_wRSChAazAjJW8OJ41Hp37OH8uB6FQ6UtHh7w5-HNGZ6H-QJ8%26ifkv%3DAfYwgwXpIuzdAU1qB68nwF_EEMSYrGL_8ursxfoF7uD6v-1z_BT14aaH6YQlefPBigZ5YTBEU4nG%26pli%3D1%26authuser%3D0&osidt=ALWU2cuw03WUaS2_1PrC5qROhR1J1_eTqmC-R2au5ii3leWN_DqbViAGEUMv4vr3U8-EE09X2db8VTPxlQASbwnntMEvctrOF4lvUSUyEIeCChMwpBlEC4kgitPgAymwk-4f34N2BK95FfLLKWLz0p9yTSHeagbe6vZ-9r26WGPXtf-d2zHmtn0LY9nlHnb3uvl4Af6YZYk9vAl6OqELFsR9vXjLOgxrNra07O6bR8zmNfILgSkPZkTyCuLVopm55zyL1TWpuH0-sG7Vok4rwPk6UK6Eq3p3W-eTEf5IwqOhr5PAGBfI84ldk-H08goyS71qAAjh68PLbKgW-VLHh-7TuArwZgSp2wr6qiK-azX9Q3YK13DY84TXnohB-L9U92EMi3c5hUQo8HYS4Fxl_2UP1Zn7PiN1YeG6iKMb55l9SDH8dRxrjVZteHAeV7DVQEMlLcBCR1i27NQWKV3e-ZVpy8VLkrC9FOM5rP_2zsyH1AhGyLL_oSA&ifkv=ARESoU1hl4tozVMRHKWIUytEJmFydqlKM18Ze9NpqgXpjqrP4keAsNHaclOOluLQzpukMdV07H3qSw#heading=h.8y0fmktk8a0w` 
+      * `docs.google.com`
+      * `Google Docs` 
+    * EX: `https://console.cloud.google.com/`
+      * `console.cloud.google.com`
+      * `Google: Cloud Console`
+        
+
+
+## `domain_name` to `domain_title`
+```swift
+
+
+/// Converts domain names into human readable:
+/// * `docs.google.com` -> `Google Docs`
+/// * `docs.github.com` -> `GitHub Docs` 
+/// * `console.cloud.google.com` -> `Google Console Cloud`
+/// * `docs.google.com` -> `Google: Docs`
+/// * `docs.github.com` -> `GitHub: Docs` 
+/// * `console.cloud.google.com` -> `Google: Console Cloud`
+func domainTitle(
+  domainName: String) -> String {
+  //let components: [String] = domainName.replacing("www.", "").split(`.`).map { titleCase($0) }.join(" ")
+  let components: [String] = domainName
+    .split(`.`)
+    .filter { "www" } 
+    .map { titleCase($0) }
+
+    let divisor = ": "
+    let divisor = ""
+    switch components.count {
+      case ...0: return ""
+      case 1: "\(components[components.count - 1])"
+      case 2...: "\(components[components.count - 1])\(divisor))\(components[0..<components.count - 2].joined(separator: " "))"
+    }        
+}
+
+extension [String] {
+  var domainTitle: String {
+    if isEmpty { return "" }
+    
+    switch count {
+      case 0: return ""
+      case 1: "\(self[count-1])"
+      case 2: "\(self[count-1]): \(self[1..<count-2].joined(separator: " "))"
+    }
+    
+  }
+}
+
+```
+        * `[last]: {1, 2, 3 ...}` As Title Case
+  <!-- * For other domain names (a specified list) we will use a particular "domain_name_format"
+    * Split by `.` then discard the last one (the .com, .net, etc...)
+    * If in this look up table, use it
+      * `github.com` -> `GitHub` -->
+
+* domain_title: 
+    * EX: `https://github.com/hatch-baby/mobile` -> `GitHub` 
+  * EX: `https://github.com/hatch-baby/mobile` -> `GitHub`
+* topic: A human readable description about the webpage
+  * This can be synthesized from 1 or 2 of the first path components of the URL (depending on how many there are and what domain)
+    * Ignore 3rd, 4th, et... path components.
+    * Ignore query items
+    * EX: `https://github.com/hatch-baby/mobile` -> `HatchBaby - mobile`
+    * EX: `https://github.com/hatch-baby/mobile/tree/main/.claude` -> `HatchBaby - mobile`
+  * This can also be grabbed from the webpage it self (page title), thought this would require fetching that HTML then parsing it. 
+
+## Examples (github.com)
+
+* `https://github.com/settings/profile` => [GitHub: Settings - Profile](https://github.com/settings/profile)
+* `https://github.com/settings/tokens` => [GitHub: Settings - Tokens](https://github.com/settings/tokens)
+* `https://github.com/hatch-baby/mobile` -> `[GitHub: HatchBaby - mobile](https://github.com/hatch-baby/mobile)`
+* `https://github.com/hatch-baby/mobile/tree/main/.claude` -> `[GitHub: HatchBaby - mobile](https://github.com/hatch-baby/mobile)`
+
+
+
+* `https://docs.github.com/en/rest?apiVersion=2022-11-28` => [GitHub: RESTful API](https://docs.github.com/en/rest?apiVersion=2022-11-28)
+* `https://docs.github.com/en/rest/authentication/keeping-your-api-credentials-secure` => [GitHub: Keeping your API credentials secureFollow these best practices to keep your API credentials and tokens secure.](https://docs.github.com/en/rest/authentication/keeping-your-api-credentials-secure)
+* `https://docs.github.com/en/rest/guides/scripting-with-the-rest-api-and-javascript` => [GitHub: Scripting with the REST API and JavaScriptWrite a script using the Octokit.js SDK to interact with the REST API.](https://docs.github.com/en/rest/guides/scripting-with-the-rest-api-and-javascript)
+
+* `https://cli.github.com/).` => [GitHub: GH CLI](https://cli.github.com/). 
+* `https://cli.github.com/manual/gh_api` => [GitHub: GH CLI Manual](https://cli.github.com/manual/gh_api)
+ -->
+
+---
+
+<!-- 
+Let;s explore adding some ViolentMonkey preferences for this script\x1B[1m
+I'd like to start with something small/easy like what which format is used for the `alt+z+click`
+
+What will this look like? What will this add to the code? Any unforseen consequences?
+
+
+
+[GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+[GitHub: Mobile - Hatch Baby](https://github.com/hatch-baby/mobile)
+[GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+[GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+[hatch-baby/mobile: Hatch Mobile](https://github.com/hatch-baby/mobile)
+
+
+URL: [GitHub: Hatch Baby - Mobile](https://github.com/hatch-baby/mobile)
+LRU: [GitHub: Mobile - Hatch Baby](https://github.com/hatch-baby/mobile)
+ -->
+
+
+---
+
+
