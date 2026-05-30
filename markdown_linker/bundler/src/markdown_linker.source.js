@@ -17,7 +17,6 @@
 // ==/UserScript==
 'use strict';
 
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 // Development targets consumed by scripts/violentmonkey/violentmonkey.zsh
 // #dev-open https://developer.mozilla.org/en-US/docs/Web/API/Selection
 // ##dev-open https://www.youtube.com/watch?v=aqz-KE-bpKQ
@@ -75,40 +74,6 @@
  * TODO / IDEAS:
  *   - See sibling file: markdown_linker.user.md
  */
-========
-(() => {
-  var __create = Object.create;
-  var __defProp = Object.defineProperty;
-  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __getProtoOf = Object.getPrototypeOf;
-  var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-    get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-  }) : x)(function(x) {
-    if (typeof require !== "undefined") return require.apply(this, arguments);
-    throw Error('Dynamic require of "' + x + '" is not supported');
-  });
-  var __commonJS = (cb, mod) => function __require2() {
-    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-  };
-  var __copyProps = (to, from, except, desc) => {
-    if (from && typeof from === "object" || typeof from === "function") {
-      for (let key of __getOwnPropNames(from))
-        if (!__hasOwnProp.call(to, key) && key !== except)
-          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-    }
-    return to;
-  };
-  var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-    // If the importer is in node compatibility mode or this is not an ESM
-    // file that has been converted to a CommonJS file using a Babel-
-    // compatible transform (i.e. "__esModule" has not been set), then set
-    // "default" to the CommonJS "module.exports" for node compatibility.
-    isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-    mod
-  ));
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
 
   // ../../common/amazon_toolkit/helpers/validation_helpers.js
   var require_validation_helpers = __commonJS({
@@ -2831,7 +2796,6 @@ ${textLink}`;
       stackoverflow: "Stack Overflow",
       medium: "Medium"
     };
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 
     document.addEventListener('selectionchange', () => {
         const selection = window.getSelection ? window.getSelection() : null;
@@ -2846,23 +2810,9 @@ ${textLink}`;
 
         lastNonEmptySelection = text;
         lastSelectionTimestamp = Date.now();
-========
-    document.addEventListener("selectionchange", () => {
-      const selection = window.getSelection ? window.getSelection() : null;
-      if (!selection) {
-        return;
-      }
-      const text = selection.toString().trim();
-      if (!text) {
-        return;
-      }
-      lastNonEmptySelection = text;
-      lastSelectionTimestamp = Date.now();
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
     });
     const ALT_Z_TITLE_PREF_KEY = "markdown_linker.altz_title_source";
     const ALT_Z_TITLE_OPTIONS = [
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
         { id: 'url-forward', label: 'URL (forward)' },
         { id: 'url-reverse', label: 'URL (reverse)' },
         { id: 'anchor', label: 'Anchor text' },
@@ -2877,15 +2827,6 @@ ${textLink}`;
      * @param {string} message - The message to log
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Console/log
      */
-========
-      { id: "url-forward", label: "URL (forward)" },
-      { id: "url-reverse", label: "URL (reverse)" },
-      { id: "anchor", label: "Anchor text" },
-      { id: "page", label: "Page title" }
-    ];
-    let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
-    let altZMenuCommandId = null;
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
     function log(message) {
       if (isDebug) {
         console.log(`${logBase}: ${message}`);
@@ -2981,7 +2922,6 @@ ${textLink}`;
     }
     log("begin script");
     initializeAltZPreference();
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 
     // ============================================================================
     // YOUTUBE TOOLKIT INTEGRATION
@@ -3753,27 +3693,6 @@ ${textLink}`;
         // }
         
         logFunctionEnd('validateUrl');
-========
-    let youtubeContextCacheKey = null;
-    let youtubeContextCacheValue = null;
-    function getYouTubeToolkit() {
-      logFunctionBegin("getYouTubeToolkit");
-      if (typeof window === "undefined") {
-        log("Window unavailable, cannot access YouTube toolkit");
-        logFunctionEnd("getYouTubeToolkit");
-        return null;
-      }
-      const toolkit = window.YouTubeToolkit || null;
-      log(`YouTube toolkit ${toolkit ? "available" : "unavailable"}`);
-      logFunctionEnd("getYouTubeToolkit");
-      return toolkit;
-    }
-    function isYouTubeUrl(url) {
-      logFunctionBegin("isYouTubeUrl");
-      if (!url) {
-        log("URL missing for YouTube detection");
-        logFunctionEnd("isYouTubeUrl");
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
         return false;
       }
       const toolkit = getYouTubeToolkit();
@@ -3797,7 +3716,6 @@ ${textLink}`;
         return false;
       }
     }
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 
     // ============================================================================
     // URL CLEANING
@@ -4040,13 +3958,6 @@ ${textLink}`;
         }
         
         logFunctionEnd('extractUrlFromAnchor');
-========
-    function extractYouTubeVideoIdFromUrl(urlLike) {
-      logFunctionBegin("extractYouTubeVideoIdFromUrl");
-      if (!urlLike) {
-        log("URL missing for video ID extraction");
-        logFunctionEnd("extractYouTubeVideoIdFromUrl");
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
         return null;
       }
       let urlObj;
@@ -4085,7 +3996,6 @@ ${textLink}`;
       logFunctionEnd("extractYouTubeVideoIdFromUrl");
       return null;
     }
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 
     /**
      * Clears cached selection memory so stale highlights are not reused
@@ -4743,63 +4653,6 @@ ${textLink}`;
                 }
             }
             return asList ? `* [${title}](${resolvedUrl})` : `[${title}](${resolvedUrl})`;
-========
-    function buildYouTubeFallbackContext(url) {
-      logFunctionBegin("buildYouTubeFallbackContext");
-      let urlObj;
-      try {
-        urlObj = new URL(url, window.location.href);
-      } catch (error) {
-        logWarn(`Fallback context URL parse failed: ${error.message}`);
-        logFunctionEnd("buildYouTubeFallbackContext");
-        return null;
-      }
-      const hostname = (urlObj.hostname || "").toLowerCase();
-      if (!hostname.includes("youtube.com") && hostname !== "youtu.be") {
-        log("Fallback context skipped: non-YouTube host");
-        logFunctionEnd("buildYouTubeFallbackContext");
-        return null;
-      }
-      const videoId = extractYouTubeVideoIdFromUrl(urlObj);
-      const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : urlObj.toString();
-      const shortUrl = videoId ? `https://youtu.be/${videoId}` : null;
-      const titleFromDom = getFirstMatchingText([
-        { selector: "h1.ytd-watch-metadata" },
-        { selector: "#title h1" },
-        { selector: 'meta[property="og:title"]', attribute: "content" },
-        { selector: 'meta[name="title"]', attribute: "content" }
-      ], "YouTube title");
-      let resolvedTitle = stripYouTubeTitleSuffix(titleFromDom);
-      if (!resolvedTitle && document && typeof document.title === "string") {
-        resolvedTitle = stripYouTubeTitleSuffix(document.title);
-      }
-      const channelName = getFirstMatchingText([
-        { selector: "#owner-name a" },
-        { selector: "ytd-channel-name a" },
-        { selector: "#channel-name a" },
-        { selector: 'meta[itemprop="author"]', attribute: "content" }
-      ], "YouTube channel");
-      if (!resolvedTitle) {
-        resolvedTitle = "YouTube Video";
-      }
-      const context = {
-        video: {
-          title: resolvedTitle,
-          channelName: channelName || null,
-          shortUrl,
-          canonicalUrl
-        },
-        playlist: null,
-        playback: null,
-        channel: channelName ? { title: channelName, canonicalUrl: null } : null,
-        pageState: "watch"
-      };
-      const videoElement = document.querySelector("video");
-      if (videoElement && typeof videoElement.currentTime === "number" && Number.isFinite(videoElement.currentTime)) {
-        context.playback = {
-          isActive: true,
-          seconds: videoElement.currentTime
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
         };
       }
       if (!context.video.title) {
@@ -4913,7 +4766,6 @@ ${textLink}`;
       }
       return context;
     }
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 
     // ============================================================================
     // MARKDOWN GENERATION AND CLIPBOARD
@@ -4947,72 +4799,6 @@ ${textLink}`;
         log(`Did create markdown: "${markdown}"`);
         logFunctionEnd('createMarkdown');
         return markdown;
-========
-    function buildYouTubeMenuOptions(context, capturedUrl) {
-      logFunctionBegin("buildYouTubeMenuOptions");
-      if (!context) {
-        log("No YouTube context provided");
-        logFunctionEnd("buildYouTubeMenuOptions");
-        return [];
-      }
-      const options = [];
-      if (context.video) {
-        const videoTitle = buildYouTubeVideoTitle(context.video);
-        if (videoTitle) {
-          log("Adding YouTube video title option");
-          options.push({
-            label: "Video Title",
-            displayValue: videoTitle,
-            getResult: () => ({
-              title: videoTitle,
-              url: capturedUrl
-            })
-          });
-        }
-        const timestampOptions = buildYouTubeTimestampMenuOptions(
-          context,
-          videoTitle,
-          context.video.canonicalUrl || capturedUrl
-        );
-        timestampOptions.forEach((option) => options.push(option));
-      }
-      if (context.playlist && context.playlist.videos && context.playlist.videos.length > 0) {
-        const playlistMarkdown = buildYouTubePlaylistMarkdown(context.playlist);
-        if (playlistMarkdown) {
-          log("Adding YouTube playlist markdown option");
-          options.push({
-            label: "Playlist Markdown",
-            displayValue: `${context.playlist.videos.length} entries`,
-            getValue: () => playlistMarkdown,
-            isAllLinks: true
-          });
-        }
-        const playlistTitle = context.playlist.title || context.playlist.url || "YouTube Playlist";
-        log("Adding YouTube playlist link option");
-        options.push({
-          label: "Playlist Link",
-          displayValue: playlistTitle,
-          getResult: () => ({
-            title: context.playlist.title ? `YouTube Playlist: ${context.playlist.title}` : "YouTube Playlist",
-            url: context.playlist.url || capturedUrl
-          })
-        });
-      }
-      if (context.channel && context.channel.title) {
-        log("Adding YouTube channel link option");
-        options.push({
-          label: "Channel Link",
-          displayValue: context.channel.title,
-          getResult: () => ({
-            title: `YouTube Channel: ${context.channel.title}`,
-            url: context.channel.canonicalUrl || capturedUrl
-          })
-        });
-      }
-      log(`Built ${options.length} YouTube-specific menu options`);
-      logFunctionEnd("buildYouTubeMenuOptions");
-      return options;
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
     }
     function getAmazonToolkit() {
       logFunctionBegin("getAmazonToolkit");
@@ -5974,7 +5760,6 @@ Open debugger to inspect?`;
       logFunctionEnd("copyToClipboard");
     }
     function extractAllLinksFlat() {
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
         logFunctionBegin('extractAllLinksFlat');
         log('Will extract all anchor elements from page');
         
@@ -6006,32 +5791,8 @@ Open debugger to inspect?`;
         log(`Generated ${markdownLinks.length} markdown links`);
         logFunctionEnd('extractAllLinksFlat');
         return result;
-========
-      logFunctionBegin("extractAllLinksFlat");
-      log("Will extract all anchor elements from page");
-      const anchors = document.querySelectorAll("a[href]");
-      log(`Found ${anchors.length} anchor elements`);
-      const markdownLinks = [];
-      anchors.forEach((anchor, index) => {
-        const href = anchor.href;
-        if (!href || href === "#" || href.startsWith("javascript:")) {
-          log(`Skipping anchor ${index}: invalid href`);
-          return;
-        }
-        const cleanedUrl = cleanUrl(href);
-        const text = getLinkText(anchor) || cleanedUrl;
-        const markdown = createMarkdown(text, cleanedUrl);
-        markdownLinks.push(markdown);
-        log(`Added link ${index}: ${markdown}`);
-      });
-      const result = markdownLinks.join("\n");
-      log(`Generated ${markdownLinks.length} markdown links`);
-      logFunctionEnd("extractAllLinksFlat");
-      return result;
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
     }
     function extractAllLinksHierarchical() {
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
         logFunctionBegin('extractAllLinksHierarchical');
         log('Will extract all anchor elements from page with hierarchy');
         
@@ -6074,36 +5835,6 @@ Open debugger to inspect?`;
         log(`Generated ${markdownLinks.length} hierarchical markdown links`);
         logFunctionEnd('extractAllLinksHierarchical');
         return result;
-========
-      logFunctionBegin("extractAllLinksHierarchical");
-      log("Will extract all anchor elements from page with hierarchy");
-      const anchors = document.querySelectorAll("a[href]");
-      log(`Found ${anchors.length} anchor elements`);
-      const markdownLinks = [];
-      anchors.forEach((anchor, index) => {
-        const href = anchor.href;
-        if (!href || href === "#" || href.startsWith("javascript:")) {
-          log(`Skipping anchor ${index}: invalid href`);
-          return;
-        }
-        let depth = 0;
-        let element = anchor.parentElement;
-        while (element && element !== document.body) {
-          depth++;
-          element = element.parentElement;
-        }
-        const indent = "  ".repeat(Math.min(depth, 10));
-        const cleanedUrl = cleanUrl(href);
-        const text = getLinkText(anchor) || cleanedUrl;
-        const markdown = `${indent}- ${createMarkdown(text, cleanedUrl)}`;
-        markdownLinks.push(markdown);
-        log(`Added link ${index} at depth ${depth}: ${markdown}`);
-      });
-      const result = markdownLinks.join("\n");
-      log(`Generated ${markdownLinks.length} hierarchical markdown links`);
-      logFunctionEnd("extractAllLinksHierarchical");
-      return result;
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
     }
     function showNotification(message) {
       logFunctionBegin("showNotification");
@@ -6193,7 +5924,6 @@ Open debugger to inspect?`;
       logFunctionEnd("showClickFeedback");
     }
     function createMenu(x, y, isAnchor, anchor = null) {
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
         logFunctionBegin('createMenu');
         log(`Will create menu at position (${x}, ${y}), isAnchor: ${isAnchor}`);
         
@@ -6233,31 +5963,6 @@ Open debugger to inspect?`;
         // Type: string (cssText property holds entire inline style string)
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/style
         menu.style.cssText = `
-========
-      logFunctionBegin("createMenu");
-      log(`Will create menu at position (${x}, ${y}), isAnchor: ${isAnchor}`);
-      const capturedUrl = targetUrl;
-      log(`Captured URL for menu: "${capturedUrl}"`);
-      let youtubeContext = null;
-      if (capturedUrl) {
-        log("Will evaluate YouTube context for captured URL");
-        youtubeContext = getYouTubeContext(capturedUrl);
-        if (youtubeContext) {
-          log("YouTube context detected for menu");
-        } else {
-          log("No YouTube context available for this URL");
-        }
-      } else {
-        log("No URL captured for menu, skipping YouTube context evaluation");
-      }
-      log("Will remove any existing menu");
-      removeMenu();
-      log("Did remove any existing menu");
-      log("Will create menu element");
-      const menu = document.createElement("div");
-      menu.id = "markdown-linker-menu";
-      menu.style.cssText = `
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
             position: fixed;
             left: ${x}px;
             top: ${y}px;
@@ -6275,7 +5980,6 @@ Open debugger to inspect?`;
             color: #f8f9fa;
             backdrop-filter: blur(26px) saturate(120%);
         `;
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
         log('Did create menu element');
 
         log('Will build menu options array');
@@ -6311,52 +6015,9 @@ Open debugger to inspect?`;
                 displayValue: pageTitle,
                 getValue: () => pageTitle
             });
-========
-      log("Did create menu element");
-      log("Will build menu options array");
-      const options = [];
-      const domainSectionOptions = [];
-      if (isAnchor) {
-        log("Is anchor, will get link text");
-        const linkText = getLinkText(anchor);
-        if (linkText) {
-          log(`Did get link text, adding to options: "${linkText}"`);
-          options.push({
-            label: "Link Text",
-            displayValue: linkText,
-            getValue: () => linkText
-          });
-        } else {
-          log("No link text available");
-        }
-      }
-      log("Will get page title");
-      const pageTitle = getPageTitle();
-      if (pageTitle) {
-        log(`Did get page title, adding to options: "${pageTitle}"`);
-        options.push({
-          label: "Page Title",
-          displayValue: pageTitle,
-          getValue: () => pageTitle
-        });
-      } else {
-        log("No page title available");
-      }
-      if (capturedUrl) {
-        log("Will build URL component title option");
-        const urlComponentTitle = getUrlComponentTitle(capturedUrl);
-        if (urlComponentTitle) {
-          log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
-          options.push({
-            label: "URL (forward)",
-            displayValue: urlComponentTitle,
-            getValue: () => urlComponentTitle
-          });
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
         } else {
           log("URL component title unavailable");
         }
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 
         if (capturedUrl) {
             log('Will build URL component title option');
@@ -6460,86 +6121,6 @@ Open debugger to inspect?`;
                 const headerLabel = document.createElement('div');
                 headerLabel.textContent = option.label;
                 headerLabel.style.cssText = `
-========
-        const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: "reverse" });
-        if (urlComponentTitleLRU) {
-          log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
-          options.push({
-            label: "URL (reverse)",
-            displayValue: urlComponentTitleLRU,
-            getValue: () => urlComponentTitleLRU
-          });
-        } else {
-          log("Reverse URL component title unavailable");
-        }
-      }
-      if (youtubeContext) {
-        log("YouTube context available, will append specialized menu options");
-        const youtubeOptions = buildYouTubeMenuOptions(youtubeContext, capturedUrl);
-        if (youtubeOptions.length > 0) {
-          domainSectionOptions.push({
-            isSectionHeader: true,
-            label: "YouTube"
-          });
-          youtubeOptions.forEach((optionDescriptor) => {
-            log(`Queueing YouTube option: ${optionDescriptor.label}`);
-            domainSectionOptions.push(optionDescriptor);
-          });
-        }
-      }
-      if (!isAnchor && !youtubeContext) {
-        log("Not anchor, will get meta description");
-        const metaDesc = getMetaDescription();
-        if (metaDesc) {
-          log(`Did get meta description, adding to options: "${metaDesc}"`);
-          options.push({
-            label: "Meta Description",
-            displayValue: metaDesc,
-            getValue: () => metaDesc
-          });
-        } else {
-          log("No meta description available");
-        }
-      }
-      if (domainSectionOptions.length > 0) {
-        log(`Adding ${domainSectionOptions.length} domain-specific entries (including headers)`);
-        domainSectionOptions.forEach((optionDescriptor) => options.push(optionDescriptor));
-      }
-      log("Adding extract all links options");
-      options.push({
-        label: "All Links (flat)",
-        displayValue: "Single-level list",
-        getValue: extractAllLinksFlat,
-        isAllLinks: true,
-        isSeparator: true
-        // Add visual separator above this item
-      });
-      options.push({
-        label: "All Links (tree)",
-        displayValue: "Preserves heading depth",
-        getValue: extractAllLinksHierarchical,
-        isAllLinks: true
-      });
-      log(`Did build ${options.length} menu options`);
-      log("Will create menu items");
-      options.forEach((option, index) => {
-        const debugLabel = option.displayValue ? `${option.label}: ${option.displayValue}` : option.label;
-        log(`Creating menu item ${index}: "${debugLabel}"`);
-        if (option.isSectionHeader) {
-          const headerWrapper = document.createElement("div");
-          headerWrapper.style.cssText = `
-                    margin-top: 12px;
-                    padding: 0 12px;
-                `;
-          const headerLine = document.createElement("div");
-          headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.55);
-                    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
-                `;
-          const headerLabel = document.createElement("div");
-          headerLabel.textContent = option.label;
-          headerLabel.style.cssText = `
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
                     margin-top: 6px;
                     padding: 4px 2px 2px;
                     text-transform: uppercase;
@@ -6549,7 +6130,6 @@ Open debugger to inspect?`;
                     color: rgba(255, 255, 255, 0.85);
                     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
                 `;
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
 
                 headerWrapper.appendChild(headerLine);
                 headerWrapper.appendChild(headerLabel);
@@ -6559,15 +6139,6 @@ Open debugger to inspect?`;
 
             const item = document.createElement('div');
             item.style.cssText = `
-========
-          headerWrapper.appendChild(headerLine);
-          headerWrapper.appendChild(headerLabel);
-          menu.appendChild(headerWrapper);
-          return;
-        }
-        const item = document.createElement("div");
-        item.style.cssText = `
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
                 padding: 8px 14px;
                 cursor: pointer;
                 white-space: normal;
@@ -6576,7 +6147,6 @@ Open debugger to inspect?`;
                 color: inherit;
                 background-color: transparent;
                 transition: background-color 120ms ease;
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
                 ${option.isSeparator ? 'border-top: 2px solid rgba(255,255,255,0.65); box-shadow: 0 -1px 0 rgba(0,0,0,0.65); margin-top: 12px; padding-top: 18px;' : ''}
             `;
 
@@ -6584,21 +6154,12 @@ Open debugger to inspect?`;
             if (option.displayValue) {
                 labelElement.textContent = option.label;
                 labelElement.style.cssText = `
-========
-                ${option.isSeparator ? "border-top: 2px solid rgba(255,255,255,0.65); box-shadow: 0 -1px 0 rgba(0,0,0,0.65); margin-top: 12px; padding-top: 18px;" : ""}
-            `;
-        const labelElement = document.createElement("div");
-        if (option.displayValue) {
-          labelElement.textContent = option.label;
-          labelElement.style.cssText = `
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
                     font-size: 10px;
                     text-transform: uppercase;
                     letter-spacing: 0.08em;
                     color: rgba(248, 249, 250, 0.65);
                     margin-bottom: 2px;
                 `;
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
                 const valueElement = document.createElement('div');
                 valueElement.textContent = option.displayValue;
                 valueElement.style.cssText = `
@@ -6910,48 +6471,6 @@ Open debugger to inspect?`;
                     }
                     createMenu(event.clientX, event.clientY, false);
                 }
-========
-          const valueElement = document.createElement("div");
-          valueElement.textContent = option.displayValue;
-          valueElement.style.cssText = `
-                    font-size: 12px;
-                    color: #f8f9fa;
-                `;
-          item.appendChild(labelElement);
-          item.appendChild(valueElement);
-        } else {
-          labelElement.textContent = option.label;
-          labelElement.style.cssText = `
-                    font-size: 12px;
-                    color: #f8f9fa;
-                `;
-          item.appendChild(labelElement);
-        }
-        item.addEventListener("mouseenter", () => {
-          item.style.backgroundColor = "rgba(255, 255, 255, 0.08)";
-        });
-        item.addEventListener("mouseleave", () => {
-          item.style.backgroundColor = "transparent";
-        });
-        item.addEventListener("click", () => {
-          log(`Menu item clicked: "${option.label}"`);
-          if (option.isAllLinks) {
-            log("All Links option selected, will extract all links");
-            const allLinksMarkdown = option.getValue ? option.getValue() : null;
-            if (allLinksMarkdown) {
-              log(`Generated all links markdown (${allLinksMarkdown.length} characters)`);
-              log("Will copy to clipboard");
-              try {
-                GM_setClipboard(allLinksMarkdown, "text/plain");
-                log("Did copy all links to clipboard");
-                showNotification("All page links copied to clipboard!");
-              } catch (error) {
-                logError(`Failed to copy all links: ${error}`);
-                alert("Failed to copy to clipboard. Check console for details.");
-              }
-            } else {
-              logError("Failed to generate all links markdown");
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
             }
           } else {
             log("Will resolve title/value for option");
@@ -6976,7 +6495,6 @@ Open debugger to inspect?`;
                 logError("Markdown creation failed (returned null)");
               }
             } else {
-<<<<<<<< HEAD:markdown_linker/bundler/src/markdown_linker.source.js
                 log('In normal mode, will create menu for page');
                 if (maybeAutoCopySelection(false, targetUrl)) {
                     log('Selection auto-copied; skipping page menu');
@@ -7188,326 +6706,6 @@ Open debugger to inspect?`;
             }
             logFunctionEnd('handleKeydown');
         }
-========
-              logWarn("Menu option did not provide both title and URL");
-            }
-          }
-          log("Will remove menu");
-          removeMenu();
-        });
-        menu.appendChild(item);
-      });
-      log("Did build all menu items");
-      log("Will append menu to body");
-      document.body.appendChild(menu);
-      currentMenu = menu;
-      log("Did append menu to body");
-      log("Will adjust menu position to stay on screen");
-      const rect = menu.getBoundingClientRect();
-      log(`Menu bounds: right=${rect.right}, bottom=${rect.bottom}, window: width=${window.innerWidth}, height=${window.innerHeight}`);
-      if (rect.right > window.innerWidth) {
-        const newLeft = window.innerWidth - rect.width - 10;
-        log(`Menu extends past right edge, adjusting left to ${newLeft}px`);
-        menu.style.left = newLeft + "px";
-      }
-      if (rect.bottom > window.innerHeight) {
-        const newTop = window.innerHeight - rect.height - 10;
-        log(`Menu extends past bottom edge, adjusting top to ${newTop}px`);
-        menu.style.top = newTop + "px";
-      }
-      log("Did adjust menu position");
-      log("Will schedule outside click listener");
-      setTimeout(() => {
-        menuClickHandler = (event) => {
-          if (currentMenu && !currentMenu.contains(event.target)) {
-            log("Outside click detected, will prevent propagation and remove menu");
-            event.preventDefault();
-            event.stopPropagation();
-            removeMenu();
-          } else {
-            log("Click inside menu, allowing propagation");
-          }
-        };
-        menuEscapeHandler = (event) => {
-          if (event.key === "Escape") {
-            log("Escape key detected, will remove menu");
-            event.preventDefault();
-            event.stopPropagation();
-            removeMenu();
-          }
-        };
-        document.addEventListener("click", menuClickHandler, { capture: true });
-        log("Did add outside click listener with event prevention");
-        document.addEventListener("keydown", menuEscapeHandler, { capture: true });
-        log("Did add Escape key listener");
-      }, 0);
-      logFunctionEnd("createMenu");
-    }
-    function removeMenu() {
-      logFunctionBegin("removeMenu");
-      if (menuClickHandler) {
-        log("Removing click handler");
-        document.removeEventListener("click", menuClickHandler, true);
-        menuClickHandler = null;
-      }
-      if (menuEscapeHandler) {
-        log("Removing escape handler");
-        document.removeEventListener("keydown", menuEscapeHandler, true);
-        menuEscapeHandler = null;
-      }
-      if (currentMenu) {
-        log("Menu exists, will remove it");
-        currentMenu.remove();
-        currentMenu = null;
-        log("Did remove menu");
-      } else {
-        log("No menu to remove");
-      }
-      log("Will clear target variables");
-      targetElement = null;
-      targetUrl = null;
-      log("Did clear target variables");
-      logFunctionEnd("removeMenu");
-    }
-    function shouldTrigger(event) {
-      logFunctionBegin("shouldTrigger");
-      log(`Checking if Alt key is pressed: ${event.altKey}`);
-      const result = event.altKey;
-      log(`Should trigger: ${result}`);
-      logFunctionEnd("shouldTrigger");
-      return result;
-    }
-    function handleClick(event) {
-      logFunctionBegin("handleClick");
-      log("Click event received");
-      const isAltPressed = event.altKey;
-      const isZPressed = isZKeyDown;
-      log(`Click: altKey=${isAltPressed}, z down=${isZPressed}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
-      if (!shouldTrigger(event)) {
-        log("Should not trigger (Alt key not pressed), returning");
-        logFunctionEnd("handleClick");
-        return;
-      }
-      log("Will prevent default and stop propagation");
-      event.preventDefault();
-      event.stopPropagation();
-      log("Did prevent default and stop propagation");
-      log("Will check if Alt+Z keys are pressed (auto-infer mode)");
-      const isAutoInferMode = event.altKey && isZKeyDown;
-      log(`Is auto-infer mode (Alt+Z+Click): ${isAutoInferMode}`);
-      if (isAutoInferMode && !isAltZBufferActive) {
-        isAltZBufferActive = true;
-        log("Activated Alt+Z buffer mode");
-      }
-      log("Will find closest anchor element");
-      const anchor = event.target.closest("a");
-      if (anchor) {
-        log("Found anchor element, will attempt URL extraction");
-        targetUrl = extractUrlFromAnchor(anchor, event);
-        targetElement = anchor;
-        if (validateUrl(targetUrl, anchor, event, "handleClick after extractUrlFromAnchor")) {
-          log(`Successfully extracted and validated URL: "${targetUrl}"`);
-          targetUrl = cleanUrl(targetUrl);
-          log(`Cleaned URL: "${targetUrl}"`);
-          if (isAutoInferMode) {
-            log("In auto-infer mode, will buffer this link");
-            log("Will show click feedback animation");
-            showClickFeedback(event.clientX, event.clientY);
-            log("Did show click feedback animation");
-            altZClickBuffer.push({ url: targetUrl, anchor });
-            log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
-          } else {
-            log("In normal mode, will create menu for anchor");
-            if (maybeAutoCopySelection(false, targetUrl)) {
-              log("Selection auto-copied; skipping menu for anchor click");
-              logFunctionEnd("handleClick");
-              return;
-            }
-            createMenu(event.clientX, event.clientY, true, anchor);
-          }
-        } else {
-          logError("URL validation failed, using current page URL as fallback");
-          targetUrl = window.location.href;
-          targetElement = null;
-          log(`Set targetUrl to current page: "${targetUrl}"`);
-          if (isAutoInferMode) {
-            log("In auto-infer mode, will buffer this link (page URL fallback)");
-            log("Will show click feedback animation");
-            showClickFeedback(event.clientX, event.clientY);
-            log("Did show click feedback animation");
-            altZClickBuffer.push({ url: targetUrl, anchor: null });
-            log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
-          } else {
-            log("In normal mode, will create menu for page (fallback)");
-            if (maybeAutoCopySelection(false, targetUrl)) {
-              log("Selection auto-copied; skipping fallback menu");
-              logFunctionEnd("handleClick");
-              return;
-            }
-            createMenu(event.clientX, event.clientY, false);
-          }
-        }
-      } else {
-        log("Clicked on page (not an anchor)");
-        targetUrl = window.location.href;
-        targetElement = null;
-        log(`Set targetUrl to current page: "${targetUrl}"`);
-        if (isAutoInferMode) {
-          log("In auto-infer mode, will buffer this link (page URL)");
-          log("Will show click feedback animation");
-          showClickFeedback(event.clientX, event.clientY);
-          log("Did show click feedback animation");
-          altZClickBuffer.push({ url: targetUrl, anchor: null });
-          log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
-        } else {
-          log("In normal mode, will create menu for page");
-          if (maybeAutoCopySelection(false, targetUrl)) {
-            log("Selection auto-copied; skipping page menu");
-            logFunctionEnd("handleClick");
-            return;
-          }
-          createMenu(event.clientX, event.clientY, false);
-        }
-      }
-      logFunctionEnd("handleClick");
-    }
-    function handleContextMenu(event) {
-      logFunctionBegin("handleContextMenu");
-      log("Context menu (right-click) event received");
-      if (!shouldTrigger(event)) {
-        log("Should not trigger (Alt key not pressed), returning");
-        logFunctionEnd("handleContextMenu");
-        return;
-      }
-      log("Will prevent default and stop propagation");
-      event.preventDefault();
-      event.stopPropagation();
-      log("Did prevent default and stop propagation");
-      log("Will find closest anchor element");
-      const anchor = event.target.closest("a");
-      if (anchor) {
-        log("Found anchor element, will attempt URL extraction");
-        targetUrl = extractUrlFromAnchor(anchor, event);
-        targetElement = anchor;
-        if (validateUrl(targetUrl, anchor, event, "handleContextMenu after extractUrlFromAnchor")) {
-          log(`Successfully extracted and validated URL: "${targetUrl}"`);
-          targetUrl = cleanUrl(targetUrl);
-          log(`Cleaned URL: "${targetUrl}"`);
-          log("Will create menu for anchor");
-          if (maybeAutoCopySelection(false, targetUrl)) {
-            log("Selection auto-copied; skipping context menu for anchor");
-            logFunctionEnd("handleContextMenu");
-            return;
-          }
-          createMenu(event.clientX, event.clientY, true, anchor);
-        } else {
-          logError("URL validation failed, using current page URL as fallback");
-          targetUrl = window.location.href;
-          targetElement = null;
-          log(`Set targetUrl to current page: "${targetUrl}"`);
-          log("Will create menu for page (fallback)");
-          if (maybeAutoCopySelection(false, targetUrl)) {
-            log("Selection auto-copied; skipping fallback context menu");
-            logFunctionEnd("handleContextMenu");
-            return;
-          }
-          createMenu(event.clientX, event.clientY, false);
-        }
-      } else {
-        log("Right-clicked on page (not an anchor)");
-        targetUrl = window.location.href;
-        targetElement = null;
-        log(`Set targetUrl to current page: "${targetUrl}"`);
-        log("Will create menu for page");
-        if (maybeAutoCopySelection(false, targetUrl)) {
-          log("Selection auto-copied; skipping context menu for page");
-          logFunctionEnd("handleContextMenu");
-          return;
-        }
-        createMenu(event.clientX, event.clientY, false);
-      }
-      logFunctionEnd("handleContextMenu");
-    }
-    function isInEditableContext(event) {
-      logFunctionBegin("isInEditableContext");
-      const target = event.target;
-      log(`Checking if target is editable: ${unwrap(target, "tagName")}`);
-      const isInputField = target instanceof HTMLInputElement;
-      log(`Is input field: ${isInputField}`);
-      const isTextArea = target instanceof HTMLTextAreaElement;
-      log(`Is textarea: ${isTextArea}`);
-      const isContentEditable = target && target.contentEditable === "true" || target ? target.closest('[contenteditable="true"]') : null;
-      log(`Is contenteditable: ${!!isContentEditable}`);
-      const result = isInputField || isTextArea || !!isContentEditable;
-      log(`Should skip keyboard trigger: ${result}`);
-      logFunctionEnd("isInEditableContext");
-      return result;
-    }
-    function handleKeydown(event) {
-      const isM = event.key === "m" || event.key === "M";
-      const isAltM = isM && event.altKey;
-      const isMalone = isM && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey;
-      if (isAltM || isMalone) {
-        logFunctionBegin("handleKeydown");
-        log("Trigger key combination detected");
-        if (isMalone && isInEditableContext(event)) {
-          log("M alone in editable context (input/textarea/contenteditable), skipping trigger");
-          logFunctionEnd("handleKeydown");
-          return;
-        }
-        log("Will prevent default and stop propagation");
-        event.preventDefault();
-        event.stopPropagation();
-        log("Did prevent default and stop propagation");
-        log(`Will check element at mouse position (${mouseX}, ${mouseY})`);
-        const hoveredElement = document.elementFromPoint(mouseX, mouseY);
-        log(`Found element: ${hoveredElement ? hoveredElement.tagName : "null"}`);
-        const anchor = hoveredElement ? hoveredElement.closest("a") : null;
-        log(`Found anchor: ${anchor ? "yes" : "no"}`);
-        if (anchor) {
-          log("Found anchor element, will attempt URL extraction");
-          targetUrl = extractUrlFromAnchor(anchor, event);
-          targetElement = anchor;
-          if (validateUrl(targetUrl, anchor, event, "handleKeydown after extractUrlFromAnchor")) {
-            log(`Successfully extracted and validated URL: "${targetUrl}"`);
-            targetUrl = cleanUrl(targetUrl);
-            log(`Cleaned URL: "${targetUrl}"`);
-            log("Will create menu for anchor");
-            if (maybeAutoCopySelection(false, targetUrl)) {
-              log("Selection auto-copied; skipping keyboard anchor menu");
-              logFunctionEnd("handleKeydown");
-              return;
-            }
-            createMenu(mouseX, mouseY, true, anchor);
-          } else {
-            logError("URL validation failed, using current page URL as fallback");
-            targetUrl = window.location.href;
-            targetElement = null;
-            log(`Set targetUrl to current page: "${targetUrl}"`);
-            log("Will create menu for page (fallback)");
-            if (maybeAutoCopySelection(false, targetUrl)) {
-              log("Selection auto-copied; skipping keyboard fallback menu");
-              logFunctionEnd("handleKeydown");
-              return;
-            }
-            createMenu(mouseX, mouseY, false);
-          }
-        } else {
-          log("Keyboard triggered on page (not hovering over anchor)");
-          targetUrl = window.location.href;
-          targetElement = null;
-          log(`Set targetUrl to current page: "${targetUrl}"`);
-          log("Will create menu for page");
-          if (maybeAutoCopySelection(false, targetUrl)) {
-            log("Selection auto-copied; skipping keyboard page menu");
-            logFunctionEnd("handleKeydown");
-            return;
-          }
-          createMenu(mouseX, mouseY, false);
-        }
-        logFunctionEnd("handleKeydown");
-      }
->>>>>>>> 85eebba44ab74d10f3e3daf774536f9357f3e884:markdown_linker/markdown_linker.user.js
     }
     let mouseX = 0;
     let mouseY = 0;

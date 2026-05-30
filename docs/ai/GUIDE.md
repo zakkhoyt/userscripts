@@ -93,6 +93,8 @@ albuquerque/
 │       └── loading_libraries_from_violentmonkey.md
 │
 ├── docs/
+│   ├── ai/
+│   │   └── GUIDE.md                   ← this file (AI agent bootstrapping)
 │   ├── images/icons/
 │   │   ├── amazon.png                 ← icon for inline prefixes in markdown
 │   │   └── youtube.png                ← icon for inline prefixes in markdown
@@ -131,7 +133,6 @@ albuquerque/
 │   └── logging_helpers.js             ← shared logging (log, logFunctionBegin, etc.)
 │
 ├── .gitignore
-├── GUIDE.md                           ← this file
 ├── README.md                          ← user-facing documentation
 └── violentmonkey.zsh                  ← symlink → scripts/violentmonkey/violentmonkey.zsh
 ```
