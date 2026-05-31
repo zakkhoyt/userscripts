@@ -258,7 +258,13 @@ Build command (from `markdown_linker/bundler/`):
 npm run build
 ```
 
-See `common/docs/bunding_userscript_and_libraries.md` for the full bundling guide.
+> [!IMPORTANT]
+> Only `markdown_linker` is bundled. Other userscripts (e.g.,
+> `amazon_item_blocker/amazon_sponsor.user.js`) are plain, single-file scripts — no build step.
+
+See [`docs/bundler/ABOUT_BUNDLER.md`](../bundler/ABOUT_BUNDLER.md) for the full bundler
+explanation (source vs. output, symlinks, the entry point, build/deploy). The older
+`common/docs/bunding_userscript_and_libraries.md` is a generic bundling primer.
 
 ### `common/amazon_toolkit` — Extraction Strategy
 

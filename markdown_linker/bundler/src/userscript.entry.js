@@ -10,5 +10,8 @@ import '../lib/markdown/markdown_formatter.js';
 import '../lib/markdown/markdown_generator.js';
 import '../lib/index.js';
 
+// YouTube Toolkit (populates window.YouTubeToolkit via its require() graph)
+import '../lib-youtube/index.js';
+
 // Main Markdown Linker userscript source
 import './markdown_linker.source.js';

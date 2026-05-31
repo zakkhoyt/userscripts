@@ -2733,6 +2733,662 @@ ${textLink}`;
     }
   });
 
+  // ../../common/youtube_toolkit/helpers/dom_helpers.js
+  var require_dom_helpers = __commonJS({
+    "../../common/youtube_toolkit/helpers/dom_helpers.js"(exports, module) {
+      "use strict";
+      function normalizeWhitespace(text) {
+        if (typeof text !== "string") {
+          return "";
+        }
+        return text.replace(/\s+/g, " ").trim();
+      }
+      function safeRoot(root) {
+        if (root && typeof root.querySelector === "function") {
+          return root;
+        }
+        if (typeof document !== "undefined" && document.querySelector) {
+          return document;
+        }
+        return null;
+      }
+      function safeQuery(selector, root) {
+        const ctx = safeRoot(root);
+        if (!ctx) {
+          return null;
+        }
+        try {
+          return ctx.querySelector(selector);
+        } catch (error) {
+          return null;
+        }
+      }
+      function safeQueryAll(selector, root) {
+        const ctx = safeRoot(root);
+        if (!ctx) {
+          return [];
+        }
+        try {
+          return Array.from(ctx.querySelectorAll(selector));
+        } catch (error) {
+          return [];
+        }
+      }
+      function textFromNode(node) {
+        if (!node || typeof node.textContent !== "string") {
+          return "";
+        }
+        return normalizeWhitespace(node.textContent);
+      }
+      function getText(selectorOrNode, root) {
+        if (typeof selectorOrNode === "string") {
+          const node = safeQuery(selectorOrNode, root);
+          return textFromNode(node);
+        }
+        return textFromNode(selectorOrNode);
+      }
+      function getAttribute(selectorOrNode, attribute, root) {
+        if (!attribute) {
+          return null;
+        }
+        const node = typeof selectorOrNode === "string" ? safeQuery(selectorOrNode, root) : selectorOrNode;
+        if (!node || typeof node.getAttribute !== "function") {
+          return null;
+        }
+        const value = node.getAttribute(attribute);
+        return value === null ? null : value;
+      }
+      function getMetaContent(doc, selector) {
+        if (!selector) {
+          return null;
+        }
+        const node = safeQuery(selector, doc);
+        if (!node) {
+          return null;
+        }
+        return normalizeWhitespace(node.content || node.getAttribute("content") || "");
+      }
+      function getLinkHref(doc, selector) {
+        const node = safeQuery(selector, doc);
+        if (!node) {
+          return null;
+        }
+        const href = node.href || node.getAttribute("href");
+        return href ? href.trim() : null;
+      }
+      function resolveUrl(href, base) {
+        if (!href) {
+          return null;
+        }
+        const origin = base || (typeof window !== "undefined" ? window.location.origin : "https://www.youtube.com");
+        try {
+          return new URL(href, origin).toString();
+        } catch (error) {
+          return null;
+        }
+      }
+      function extractJSONFromScripts(doc, variableNames = []) {
+        const scripts = safeQueryAll("script", doc);
+        for (const script of scripts) {
+          const content = script && script.textContent ? script.textContent.trim() : "";
+          if (!content) {
+            continue;
+          }
+          for (const variableName of variableNames) {
+            const json = extractAssignedObject(content, variableName);
+            if (json) {
+              return json;
+            }
+          }
+        }
+        return null;
+      }
+      function extractAssignedObject(source, variableName) {
+        const assignmentIndex = source.indexOf(variableName);
+        if (assignmentIndex === -1) {
+          return null;
+        }
+        const equalsIndex = source.indexOf("=", assignmentIndex);
+        if (equalsIndex === -1) {
+          return null;
+        }
+        const braceStart = source.indexOf("{", equalsIndex);
+        if (braceStart === -1) {
+          return null;
+        }
+        let depth = 0;
+        for (let index = braceStart; index < source.length; index += 1) {
+          const char = source[index];
+          if (char === "{") {
+            depth += 1;
+          } else if (char === "}") {
+            depth -= 1;
+            if (depth === 0) {
+              const jsonString = source.slice(braceStart, index + 1);
+              try {
+                return JSON.parse(jsonString);
+              } catch (error) {
+                return null;
+              }
+            }
+          }
+        }
+        return null;
+      }
+      module.exports = {
+        safeQuery,
+        safeQueryAll,
+        getText,
+        getAttribute,
+        getMetaContent,
+        getLinkHref,
+        resolveUrl,
+        extractJSONFromScripts,
+        normalizeWhitespace
+      };
+      if (typeof window !== "undefined") {
+        window.YouTubeToolkit = window.YouTubeToolkit || {};
+        window.YouTubeToolkit.Helpers = window.YouTubeToolkit.Helpers || {};
+        window.YouTubeToolkit.Helpers.DOM = module.exports;
+      }
+    }
+  });
+
+  // ../../common/youtube_toolkit/helpers/time_helpers.js
+  var require_time_helpers = __commonJS({
+    "../../common/youtube_toolkit/helpers/time_helpers.js"(exports, module) {
+      "use strict";
+      function toInteger(value) {
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      function secondsToTimestamp(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return null;
+        }
+        const wholeSeconds = Math.floor(seconds);
+        const hours = Math.floor(wholeSeconds / 3600);
+        const minutes = Math.floor(wholeSeconds % 3600 / 60);
+        const secs = wholeSeconds % 60;
+        const parts = [];
+        if (hours > 0) {
+          parts.push(`${hours}h`);
+        }
+        if (hours > 0 || minutes > 0) {
+          parts.push(`${minutes}m`);
+        }
+        parts.push(`${secs}s`);
+        return parts.join("");
+      }
+      function secondsToClock(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return null;
+        }
+        const wholeSeconds = Math.floor(seconds);
+        const hours = Math.floor(wholeSeconds / 3600);
+        const minutes = Math.floor(wholeSeconds % 3600 / 60);
+        const secs = wholeSeconds % 60;
+        const pad = (value) => value.toString().padStart(2, "0");
+        if (hours > 0) {
+          return `${hours}:${pad(minutes)}:${pad(secs)}`;
+        }
+        return `${minutes}:${pad(secs)}`;
+      }
+      function parseClockText(text) {
+        if (!text) {
+          return null;
+        }
+        const sanitized = text.replace(/[^0-9:]/g, "").trim();
+        if (!sanitized) {
+          return null;
+        }
+        const parts = sanitized.split(":").map(toInteger);
+        if (parts.some((part) => !Number.isFinite(part))) {
+          return null;
+        }
+        while (parts.length < 3) {
+          parts.unshift(0);
+        }
+        const [hours, minutes, seconds] = parts;
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+        return totalSeconds > 0 ? totalSeconds : null;
+      }
+      function parseISODuration(isoDuration) {
+        if (typeof isoDuration !== "string" || !isoDuration.startsWith("PT")) {
+          return null;
+        }
+        const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        if (!match) {
+          return null;
+        }
+        const hours = toInteger(match[1]);
+        const minutes = toInteger(match[2]);
+        const seconds = toInteger(match[3]);
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+        return totalSeconds > 0 ? totalSeconds : null;
+      }
+      function formatTimestampParam(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return null;
+        }
+        return `t=${Math.floor(seconds)}s`;
+      }
+      module.exports = {
+        secondsToTimestamp,
+        secondsToClock,
+        parseClockText,
+        parseISODuration,
+        formatTimestampParam
+      };
+      if (typeof window !== "undefined") {
+        window.YouTubeToolkit = window.YouTubeToolkit || {};
+        window.YouTubeToolkit.Helpers = window.YouTubeToolkit.Helpers || {};
+        window.YouTubeToolkit.Helpers.Time = module.exports;
+      }
+    }
+  });
+
+  // ../../common/youtube_toolkit/extractors/video_extractor.js
+  var require_video_extractor = __commonJS({
+    "../../common/youtube_toolkit/extractors/video_extractor.js"(exports, module) {
+      "use strict";
+      var DOM = require_dom_helpers();
+      var Time = require_time_helpers();
+      function getVideoIdFromUrl(url = "") {
+        if (!url) {
+          return null;
+        }
+        try {
+          const parsed = new URL(url, "https://www.youtube.com");
+          if (parsed.hostname === "youtu.be") {
+            const slug = parsed.pathname.replace("/", "").trim();
+            return slug || null;
+          }
+          const id = parsed.searchParams.get("v");
+          if (id) {
+            return id;
+          }
+          const segments = parsed.pathname.split("/");
+          if (segments.includes("shorts")) {
+            const idx = segments.indexOf("shorts");
+            return segments[idx + 1] || null;
+          }
+          return null;
+        } catch (error) {
+          return null;
+        }
+      }
+      function getPlaylistIdFromUrl(url = "") {
+        if (!url) {
+          return null;
+        }
+        try {
+          const parsed = new URL(url, "https://www.youtube.com");
+          return parsed.searchParams.get("list");
+        } catch (error) {
+          return null;
+        }
+      }
+      function getPlayerResponse(doc) {
+        return DOM.extractJSONFromScripts(doc, ["ytInitialPlayerResponse"]);
+      }
+      function extractVideoTitle(doc, playerResponse) {
+        const ogTitle = DOM.getMetaContent(doc, 'meta[property="og:title"]');
+        if (ogTitle) {
+          return ogTitle;
+        }
+        const h1 = DOM.getText("h1.ytd-watch-metadata", doc);
+        if (h1) {
+          return h1;
+        }
+        const titleElement = DOM.getText("#title #container yt-formatted-string", doc);
+        if (titleElement) {
+          return titleElement;
+        }
+        return playerResponse?.videoDetails?.title || null;
+      }
+      function extractChannelName(doc, playerResponse) {
+        const header = DOM.getText("#top-row #channel-name a", doc) || DOM.getText("#channel-name a", doc);
+        if (header) {
+          return header;
+        }
+        const author = DOM.getText('link[itemprop="name"]', doc);
+        if (author) {
+          return author;
+        }
+        return playerResponse?.videoDetails?.author || null;
+      }
+      function extractChannelUrl(doc) {
+        const anchor = DOM.getAttribute("#channel-name a", "href", doc);
+        if (anchor) {
+          return DOM.resolveUrl(anchor);
+        }
+        const handleAnchor = DOM.getAttribute('a[href^="/@"]', "href", doc);
+        if (handleAnchor) {
+          return DOM.resolveUrl(handleAnchor);
+        }
+        const channelId = DOM.getMetaContent(doc, 'meta[itemprop="channelId"]');
+        if (channelId) {
+          return `https://www.youtube.com/channel/${channelId}`;
+        }
+        return null;
+      }
+      function extractChannelHandle(doc) {
+        const handleAnchor = DOM.getAttribute('a[href^="/@"]', "href", doc);
+        if (!handleAnchor) {
+          return null;
+        }
+        return handleAnchor.replace("/", "").trim();
+      }
+      function extractDuration(doc, playerResponse) {
+        const isoDuration = DOM.getMetaContent(doc, 'meta[itemprop="duration"]');
+        if (isoDuration) {
+          const parsed = Time.parseISODuration(isoDuration);
+          if (parsed) {
+            return parsed;
+          }
+        }
+        const lengthSeconds = playerResponse?.videoDetails?.lengthSeconds;
+        if (lengthSeconds) {
+          const parsed = parseInt(lengthSeconds, 10);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+      }
+      function detectLive(doc, playerResponse) {
+        const liveBadge = DOM.getMetaContent(doc, 'meta[itemprop="isLiveBroadcast"]');
+        if (liveBadge) {
+          return liveBadge === "True";
+        }
+        const isLive = playerResponse?.videoDetails?.isLiveContent;
+        return Boolean(isLive);
+      }
+      function extractVideoMetadata(doc, url = "") {
+        const playerResponse = getPlayerResponse(doc);
+        const title = extractVideoTitle(doc, playerResponse);
+        const channelName = extractChannelName(doc, playerResponse);
+        const channelUrl = extractChannelUrl(doc);
+        const channelHandle = extractChannelHandle(doc);
+        const canonicalUrl = DOM.getLinkHref(doc, 'link[rel="canonical"]');
+        const videoId = getVideoIdFromUrl(url) || playerResponse?.videoDetails?.videoId || getVideoIdFromUrl(canonicalUrl);
+        const shortUrl = videoId ? `https://youtu.be/${videoId}` : null;
+        const playlistId = getPlaylistIdFromUrl(url) || playerResponse?.playlistId || null;
+        const durationSeconds = extractDuration(doc, playerResponse);
+        const isLive = detectLive(doc, playerResponse);
+        return {
+          title,
+          channelName,
+          channelUrl,
+          channelHandle,
+          canonicalUrl: canonicalUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null),
+          shortUrl,
+          videoId,
+          playlistId,
+          durationSeconds,
+          isLive,
+          description: DOM.getMetaContent(doc, 'meta[name="description"]') || null
+        };
+      }
+      function extractPlaybackState(doc, options = {}) {
+        const videoElement = options.videoElement || DOM.safeQuery("video", doc);
+        if (!videoElement) {
+          return { seconds: 0, formatted: null, isActive: false };
+        }
+        const seconds = Number(videoElement.currentTime || 0);
+        const validSeconds = Number.isFinite(seconds) ? Math.floor(seconds) : 0;
+        return {
+          seconds: validSeconds,
+          formatted: Time.secondsToTimestamp(validSeconds) || null,
+          isActive: validSeconds > 0
+        };
+      }
+      module.exports = {
+        extractVideoMetadata,
+        extractPlaybackState,
+        getVideoIdFromUrl,
+        getPlaylistIdFromUrl
+      };
+      if (typeof window !== "undefined") {
+        window.YouTubeToolkit = window.YouTubeToolkit || {};
+        window.YouTubeToolkit.Extractors = window.YouTubeToolkit.Extractors || {};
+        window.YouTubeToolkit.Extractors.Video = module.exports;
+      }
+    }
+  });
+
+  // ../../common/youtube_toolkit/extractors/channel_extractor.js
+  var require_channel_extractor = __commonJS({
+    "../../common/youtube_toolkit/extractors/channel_extractor.js"(exports, module) {
+      "use strict";
+      var DOM = require_dom_helpers();
+      function extractSubscriberCount(doc) {
+        const badge = DOM.getText("#subscriber-count", doc) || DOM.getText("#subscriber-count yt-formatted-string", doc);
+        return badge || null;
+      }
+      function extractChannelMetadata(doc, url = "") {
+        const title = DOM.getText("ytd-channel-name #text", doc) || DOM.getText('meta[property="og:title"]', doc);
+        const description = DOM.getMetaContent(doc, 'meta[name="description"]');
+        const canonicalUrl = DOM.getLinkHref(doc, 'link[rel="canonical"]') || url || null;
+        const handle = DOM.getText("ytd-channel-handle", doc) || DOM.getAttribute('a[href^="/@"]', "href", doc);
+        const avatar = DOM.getAttribute("#avatar img", "src", doc) || DOM.getAttribute("img#img", "src", doc);
+        const subscriberCount = extractSubscriberCount(doc);
+        return {
+          title,
+          description,
+          canonicalUrl,
+          handle: handle ? handle.replace("/", "").trim() : null,
+          avatar,
+          subscriberCount
+        };
+      }
+      module.exports = {
+        extractChannelMetadata
+      };
+      if (typeof window !== "undefined") {
+        window.YouTubeToolkit = window.YouTubeToolkit || {};
+        window.YouTubeToolkit.Extractors = window.YouTubeToolkit.Extractors || {};
+        window.YouTubeToolkit.Extractors.Channel = module.exports;
+      }
+    }
+  });
+
+  // ../../common/youtube_toolkit/extractors/playlist_extractor.js
+  var require_playlist_extractor = __commonJS({
+    "../../common/youtube_toolkit/extractors/playlist_extractor.js"(exports, module) {
+      "use strict";
+      var DOM = require_dom_helpers();
+      var Time = require_time_helpers();
+      var VideoExtractor = require_video_extractor();
+      var PLAYLIST_RENDERERS = [
+        "ytd-playlist-video-renderer",
+        "ytd-playlist-panel-video-renderer"
+      ];
+      function parseIndexFromRenderer(renderer) {
+        const indexText = DOM.getText("#index span", renderer) || DOM.getText("#index", renderer);
+        const parsed = parseInt(indexText, 10);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      function parseDuration(renderer) {
+        const durationText = DOM.getText("span#text.ytd-thumbnail-overlay-time-status-renderer", renderer) || DOM.getText("span.ytd-thumbnail-overlay-time-status-renderer", renderer) || DOM.getText("span.thumbnail-overlay-time-status-renderer", renderer);
+        const seconds = Time.parseClockText(durationText);
+        return {
+          durationSeconds: seconds,
+          durationText: seconds ? Time.secondsToClock(seconds) : null
+        };
+      }
+      function buildPlaylistItem(anchor, renderer, fallbackIndex) {
+        if (!anchor) {
+          return null;
+        }
+        const href = anchor.href || anchor.getAttribute("href");
+        const resolvedUrl = DOM.resolveUrl(href);
+        const urlObject = resolvedUrl ? new URL(resolvedUrl) : null;
+        const videoId = urlObject ? VideoExtractor.getVideoIdFromUrl(urlObject.toString()) : null;
+        const { durationSeconds, durationText } = parseDuration(renderer);
+        const channelName = DOM.getText("a.yt-simple-endpoint.yt-formatted-string", renderer) || null;
+        const playlistIndex = urlObject && urlObject.searchParams.get("index") ? parseInt(urlObject.searchParams.get("index"), 10) : parseIndexFromRenderer(renderer) || fallbackIndex;
+        return {
+          index: playlistIndex || fallbackIndex || null,
+          title: DOM.getText(anchor) || null,
+          url: resolvedUrl,
+          videoId,
+          durationSeconds,
+          durationText,
+          channelName
+        };
+      }
+      function extractPlaylistItems(doc) {
+        const items = [];
+        const seen = /* @__PURE__ */ new Set();
+        PLAYLIST_RENDERERS.forEach((selector) => {
+          const renderers = DOM.safeQueryAll(selector, doc);
+          renderers.forEach((renderer, idx) => {
+            const anchor = DOM.safeQuery("a#video-title", renderer) || DOM.safeQuery("a.yt-simple-endpoint", renderer);
+            const item = buildPlaylistItem(anchor, renderer, idx + 1);
+            if (!item || !item.url) {
+              return;
+            }
+            const dedupeKey = `${item.videoId || item.url}#${item.index || idx}`;
+            if (seen.has(dedupeKey)) {
+              return;
+            }
+            seen.add(dedupeKey);
+            items.push(item);
+          });
+        });
+        return items;
+      }
+      function extractPlaylistTitle(doc) {
+        return DOM.getText("yt-formatted-string#title", doc) || DOM.getText("yt-formatted-string.ytd-playlist-panel-renderer", doc) || DOM.getMetaContent(doc, 'meta[property="og:title"]') || null;
+      }
+      function extractPlaylistMetadata(doc, url = "") {
+        const playlistId = VideoExtractor.getPlaylistIdFromUrl(url) || DOM.getAttribute('meta[itemprop="playlistId"]', "content", doc) || null;
+        const title = extractPlaylistTitle(doc);
+        const items = extractPlaylistItems(doc);
+        const playlistUrl = playlistId ? `https://www.youtube.com/playlist?list=${playlistId}` : url || null;
+        return {
+          playlistId,
+          title,
+          url: playlistUrl,
+          videos: items
+        };
+      }
+      module.exports = {
+        extractPlaylistMetadata
+      };
+      if (typeof window !== "undefined") {
+        window.YouTubeToolkit = window.YouTubeToolkit || {};
+        window.YouTubeToolkit.Extractors = window.YouTubeToolkit.Extractors || {};
+        window.YouTubeToolkit.Extractors.Playlist = module.exports;
+      }
+    }
+  });
+
+  // ../../common/youtube_toolkit/extractors/page_state_extractor.js
+  var require_page_state_extractor = __commonJS({
+    "../../common/youtube_toolkit/extractors/page_state_extractor.js"(exports, module) {
+      "use strict";
+      var { resolveUrl } = require_dom_helpers();
+      var WATCH_PATHS = ["/watch", "/live"];
+      var PLAYLIST_PATHS = ["/playlist"];
+      var SHORTS_PATH = "/shorts";
+      function normalizeUrl(url) {
+        if (!url && typeof window !== "undefined") {
+          return window.location.href;
+        }
+        return url;
+      }
+      function determinePageState(url = "", doc) {
+        const resolved = normalizeUrl(url);
+        if (!resolved) {
+          return "unknown";
+        }
+        let parsed;
+        try {
+          parsed = new URL(resolved, "https://www.youtube.com");
+        } catch (error) {
+          return "unknown";
+        }
+        const pathname = parsed.pathname || "";
+        const hasWatchParam = parsed.searchParams.has("v");
+        const hasPlaylistParam = parsed.searchParams.has("list");
+        if (WATCH_PATHS.some((segment) => pathname.startsWith(segment)) || hasWatchParam) {
+          return hasPlaylistParam ? "watch-with-playlist" : "watch";
+        }
+        if (pathname.startsWith(SHORTS_PATH)) {
+          return "shorts";
+        }
+        if (PLAYLIST_PATHS.some((segment) => pathname.startsWith(segment)) || hasPlaylistParam) {
+          return "playlist";
+        }
+        if (pathname.startsWith("/channel/") || pathname.startsWith("/@")) {
+          return "channel";
+        }
+        if (doc) {
+          const ogType = doc.querySelector ? doc.querySelector('meta[property="og:type"]') : null;
+          const ogContent = ogType ? ogType.content : null;
+          if (ogContent === "video.other") {
+            return "watch";
+          }
+        }
+        return "unknown";
+      }
+      function isYouTubeHost(url = "") {
+        const resolved = normalizeUrl(url);
+        if (!resolved) {
+          return false;
+        }
+        try {
+          const parsed = new URL(resolved, "https://www.youtube.com");
+          return parsed.hostname.includes("youtube.com") || parsed.hostname === "youtu.be";
+        } catch (error) {
+          return false;
+        }
+      }
+      module.exports = {
+        determinePageState,
+        isYouTubeHost
+      };
+      if (typeof window !== "undefined") {
+        window.YouTubeToolkit = window.YouTubeToolkit || {};
+        window.YouTubeToolkit.Extractors = window.YouTubeToolkit.Extractors || {};
+        window.YouTubeToolkit.Extractors.PageState = module.exports;
+      }
+    }
+  });
+
+  // ../../common/youtube_toolkit/index.js
+  var require_youtube_toolkit = __commonJS({
+    "../../common/youtube_toolkit/index.js"(exports, module) {
+      "use strict";
+      var DOMHelpers = require_dom_helpers();
+      var TimeHelpers = require_time_helpers();
+      var VideoExtractor = require_video_extractor();
+      var ChannelExtractor = require_channel_extractor();
+      var PlaylistExtractor = require_playlist_extractor();
+      var PageStateExtractor = require_page_state_extractor();
+      var YouTubeToolkit = {
+        version: "0.1.0",
+        Helpers: {
+          DOM: DOMHelpers,
+          Time: TimeHelpers
+        },
+        Extractors: {
+          Video: VideoExtractor,
+          Channel: ChannelExtractor,
+          Playlist: PlaylistExtractor,
+          PageState: PageStateExtractor
+        }
+      };
+      if (typeof module !== "undefined" && module.exports) {
+        module.exports = YouTubeToolkit;
+      }
+      if (typeof window !== "undefined") {
+        window.YouTubeToolkit = YouTubeToolkit;
+      }
+    }
+  });
+
   // src/userscript.entry.js
   var import_validation_helpers = __toESM(require_validation_helpers(), 1);
   var import_shared_extractor = __toESM(require_shared_extractor(), 1);
@@ -2744,6 +3400,7 @@ ${textLink}`;
   var import_markdown_formatter = __toESM(require_markdown_formatter(), 1);
   var import_markdown_generator = __toESM(require_markdown_generator(), 1);
   var import_lib = __toESM(require_amazon_toolkit(), 1);
+  var import_lib_youtube = __toESM(require_youtube_toolkit(), 1);
 
   // src/markdown_linker.source.js
   console.log(`markdown_linker: 01`);
@@ -3139,6 +3796,246 @@ ${textLink}`;
         context.channel = context.channel || fallbackContext.channel;
       }
       return context;
+    }
+    function buildYouTubeContextIntent(url, toolkit) {
+      logFunctionBegin("buildYouTubeContextIntent");
+      if (!url || !toolkit) {
+        log("Missing URL or toolkit for YouTube context intent");
+        logFunctionEnd("buildYouTubeContextIntent");
+        return { key: null };
+      }
+      const pageStateExtractor = toolkit?.Extractors?.PageState;
+      const videoExtractor = toolkit?.Extractors?.Video;
+      if (!pageStateExtractor || !videoExtractor) {
+        log("Toolkit missing PageState or Video extractors");
+        logFunctionEnd("buildYouTubeContextIntent");
+        return { key: null };
+      }
+      let targetUrl2;
+      let currentUrl;
+      try {
+        targetUrl2 = new URL(url, window.location.href);
+        currentUrl = new URL(window.location.href);
+      } catch (error) {
+        logWarn(`Failed to parse URLs for context intent: ${error.message}`);
+        logFunctionEnd("buildYouTubeContextIntent");
+        return { key: null };
+      }
+      const isCurrentYouTube = pageStateExtractor.isYouTubeHost(currentUrl.toString());
+      const isTargetYouTube = pageStateExtractor.isYouTubeHost(targetUrl2.toString());
+      if (!isCurrentYouTube || !isTargetYouTube) {
+        log("Either current or target URL is not a YouTube host");
+        logFunctionEnd("buildYouTubeContextIntent");
+        return { key: null };
+      }
+      const targetVideoId = videoExtractor.getVideoIdFromUrl(targetUrl2.toString());
+      const currentVideoId = videoExtractor.getVideoIdFromUrl(currentUrl.toString());
+      const sameVideo = Boolean(targetVideoId && currentVideoId && targetVideoId === currentVideoId);
+      let targetPlaylistId = videoExtractor.getPlaylistIdFromUrl(targetUrl2.toString());
+      const currentPlaylistId = videoExtractor.getPlaylistIdFromUrl(currentUrl.toString());
+      if (!targetPlaylistId && sameVideo) {
+        targetPlaylistId = currentPlaylistId;
+      }
+      const samePlaylist = Boolean(targetPlaylistId && currentPlaylistId && targetPlaylistId === currentPlaylistId);
+      const sameChannel = currentUrl.pathname === targetUrl2.pathname && (currentUrl.pathname.startsWith("/channel/") || currentUrl.pathname.startsWith("/@"));
+      let key = null;
+      if (sameVideo) {
+        key = `video:${currentVideoId}:${currentPlaylistId || ""}`;
+      } else if (samePlaylist) {
+        key = `playlist:${targetPlaylistId || currentPlaylistId}`;
+      } else if (sameChannel) {
+        key = `channel:${currentUrl.pathname}`;
+      }
+      log(`YouTube context key computed: ${key || "none"}`);
+      logFunctionEnd("buildYouTubeContextIntent");
+      return {
+        key,
+        sameVideo,
+        samePlaylist,
+        sameChannel,
+        playlistId: currentPlaylistId || targetPlaylistId || null
+      };
+    }
+    function getYouTubeContext(url) {
+      logFunctionBegin("getYouTubeContext");
+      if (!url || !isYouTubeUrl(url)) {
+        log("URL not eligible for YouTube context");
+        logFunctionEnd("getYouTubeContext");
+        return null;
+      }
+      const toolkit = getYouTubeToolkit();
+      if (!toolkit) {
+        log("YouTube toolkit unavailable, attempting DOM fallback context");
+        const fallbackContext = buildYouTubeFallbackContext(url);
+        logFunctionEnd("getYouTubeContext");
+        return fallbackContext;
+      }
+      const intent = buildYouTubeContextIntent(url, toolkit);
+      if (!intent.key) {
+        log("No valid YouTube context key, attempting fallback context");
+        const fallbackContext = buildYouTubeFallbackContext(url);
+        logFunctionEnd("getYouTubeContext");
+        return fallbackContext;
+      }
+      if (youtubeContextCacheKey === intent.key && youtubeContextCacheValue) {
+        log("Using cached YouTube context");
+        logFunctionEnd("getYouTubeContext");
+        return youtubeContextCacheValue;
+      }
+      const pageStateExtractor = toolkit?.Extractors?.PageState;
+      const videoExtractor = toolkit?.Extractors?.Video;
+      const playlistExtractor = toolkit?.Extractors?.Playlist;
+      const channelExtractor = toolkit?.Extractors?.Channel;
+      const context = {
+        video: null,
+        playlist: null,
+        playback: null,
+        channel: null,
+        pageState: null
+      };
+      if (pageStateExtractor && typeof pageStateExtractor.determinePageState === "function") {
+        context.pageState = pageStateExtractor.determinePageState(window.location.href, document);
+      }
+      if (intent.sameVideo && videoExtractor) {
+        context.video = videoExtractor.extractVideoMetadata(document, url);
+        context.playback = videoExtractor.extractPlaybackState(document);
+      }
+      const shouldAttachPlaylist = intent.samePlaylist || intent.sameVideo && intent.playlistId || context.pageState === "playlist" || context.pageState === "watch-with-playlist";
+      if (shouldAttachPlaylist && playlistExtractor) {
+        const playlistSourceUrl = intent.samePlaylist ? url : window.location.href;
+        context.playlist = playlistExtractor.extractPlaylistMetadata(document, playlistSourceUrl);
+      }
+      if (intent.sameChannel && channelExtractor) {
+        context.channel = channelExtractor.extractChannelMetadata(document, url);
+      }
+      if (!context.video && !context.playlist && !context.channel) {
+        log("YouTube context extraction produced no data, attempting fallback context");
+        const fallbackContext = buildYouTubeFallbackContext(url);
+        logFunctionEnd("getYouTubeContext");
+        return fallbackContext;
+      }
+      const enrichedContext = enrichYouTubeContextWithFallback(context, url);
+      youtubeContextCacheKey = intent.key;
+      youtubeContextCacheValue = enrichedContext;
+      log("Cached toolkit YouTube context");
+      logFunctionEnd("getYouTubeContext");
+      return enrichedContext;
+    }
+    function buildYouTubeVideoTitle(videoMeta) {
+      logFunctionBegin("buildYouTubeVideoTitle");
+      if (!videoMeta) {
+        log("Video metadata missing");
+        logFunctionEnd("buildYouTubeVideoTitle");
+        return null;
+      }
+      const channel = videoMeta.channelName || videoMeta.channelHandle || "YouTube";
+      const title = videoMeta.title || "Video";
+      const formatted = `YouTube: ${channel} - ${title}`;
+      log(`Formatted YouTube video title: "${formatted}"`);
+      logFunctionEnd("buildYouTubeVideoTitle");
+      return formatted;
+    }
+    function buildYouTubeTimestampUrl(baseUrl, timestampValue) {
+      logFunctionBegin("buildYouTubeTimestampUrl");
+      if (!baseUrl || !timestampValue) {
+        log("Base URL or timestamp missing");
+        logFunctionEnd("buildYouTubeTimestampUrl");
+        return null;
+      }
+      try {
+        const urlObj = new URL(baseUrl, window.location.href);
+        urlObj.searchParams.set("t", timestampValue);
+        const result = urlObj.toString();
+        log(`Timestamp URL built: ${result}`);
+        logFunctionEnd("buildYouTubeTimestampUrl");
+        return result;
+      } catch (error) {
+        logWarn(`Failed to build timestamp URL via URL API: ${error.message}`);
+        const separator = baseUrl.includes("?") ? "&" : "?";
+        const fallback = `${baseUrl}${separator}t=${timestampValue}`;
+        log(`Using fallback timestamp URL: ${fallback}`);
+        logFunctionEnd("buildYouTubeTimestampUrl");
+        return fallback;
+      }
+    }
+    function buildYouTubeTimestampMenuOptions(context, baseTitle, fallbackUrl) {
+      logFunctionBegin("buildYouTubeTimestampMenuOptions");
+      if (!context || !context.playback || !context.playback.isActive || !context.video) {
+        log("Timestamp prerequisites missing (context/playback/video)");
+        logFunctionEnd("buildYouTubeTimestampMenuOptions");
+        return [];
+      }
+      const seconds = context.playback.seconds;
+      if (!Number.isFinite(seconds) || seconds <= 0) {
+        log("Playback seconds invalid for timestamp options");
+        logFunctionEnd("buildYouTubeTimestampMenuOptions");
+        return [];
+      }
+      const shortBase = context.video.shortUrl || fallbackUrl || context.video.canonicalUrl;
+      if (!shortBase) {
+        log("No base URL available for timestamp links");
+        logFunctionEnd("buildYouTubeTimestampMenuOptions");
+        return [];
+      }
+      const timestampDisplay = formatSecondsAsTimestamp(seconds) || `${Math.floor(seconds)}s`;
+      const decoratedBaseTitle = baseTitle || context.video.title || "YouTube Video";
+      const decoratedTitle = `${decoratedBaseTitle} @ ${timestampDisplay}`;
+      const timestampUrl = buildYouTubeTimestampUrl(shortBase, `${Math.floor(seconds)}`);
+      if (!timestampUrl) {
+        log("Failed to build timestamp URL");
+        logFunctionEnd("buildYouTubeTimestampMenuOptions");
+        return [];
+      }
+      const option = {
+        label: "Timestamp",
+        displayValue: decoratedTitle,
+        getResult: () => ({
+          title: decoratedTitle,
+          url: timestampUrl
+        })
+      };
+      log("Built 1 timestamp menu option");
+      logFunctionEnd("buildYouTubeTimestampMenuOptions");
+      return [option];
+    }
+    function getFirstMatchingText(descriptors, contextLabel) {
+      logFunctionBegin("getFirstMatchingText");
+      if (!Array.isArray(descriptors) || descriptors.length === 0) {
+        log("Descriptor list empty");
+        logFunctionEnd("getFirstMatchingText");
+        return null;
+      }
+      for (let index = 0; index < descriptors.length; index += 1) {
+        const descriptor = descriptors[index];
+        if (!descriptor || !descriptor.selector) {
+          continue;
+        }
+        const element = document.querySelector(descriptor.selector);
+        if (!element) {
+          continue;
+        }
+        const rawValue = descriptor.attribute ? element.getAttribute(descriptor.attribute) : element.textContent;
+        const trimmedValue = rawValue ? rawValue.trim() : "";
+        if (trimmedValue) {
+          log(`Matched ${contextLabel} selector: ${descriptor.selector}`);
+          logFunctionEnd("getFirstMatchingText");
+          return trimmedValue;
+        }
+      }
+      log(`No ${contextLabel} selector produced text`);
+      logFunctionEnd("getFirstMatchingText");
+      return null;
+    }
+    function stripYouTubeTitleSuffix(title) {
+      if (!title) {
+        return null;
+      }
+      const trimmed = title.trim();
+      if (!trimmed) {
+        return null;
+      }
+      const stripped = trimmed.replace(/\s+-\s+YouTube$/i, "").trim();
+      return stripped || trimmed;
     }
     function buildYouTubeMenuOptions(context, capturedUrl) {
       logFunctionBegin("buildYouTubeMenuOptions");
@@ -4312,7 +5209,12 @@ Open debugger to inspect?`;
       let youtubeContext = null;
       if (capturedUrl) {
         log("Will evaluate YouTube context for captured URL");
-        youtubeContext = getYouTubeContext(capturedUrl);
+        try {
+          youtubeContext = getYouTubeContext(capturedUrl);
+        } catch (error) {
+          logError(`YouTube context evaluation failed (non-fatal): ${error}`);
+          youtubeContext = null;
+        }
         if (youtubeContext) {
           log("YouTube context detected for menu");
         } else {
