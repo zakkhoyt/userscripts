@@ -4,4 +4,3 @@
 
 * Tools > Browser Tools > Page Source: `purple_tape.html`
 * Context Click -> Save Page As (html only): `save_page_as.html`
-* File > Save Page As (complete): `save_webpage_complete.html` && `save_webpage_complete/**/*`
