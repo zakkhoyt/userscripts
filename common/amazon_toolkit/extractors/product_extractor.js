@@ -124,8 +124,12 @@ function extractProductData(source, url) {
     const priceData = extractProductPriceData(doc);
     const imageData = extractProductImageData(doc);
     const variant = extractProductVariant(doc);
+    const variants = extractProductVariants(doc);
     const availability = extractProductAvailability(doc);
     const shipping = extractProductShipping(doc);
+    const delivery = extractProductDelivery(doc);
+    const store = extractProductStore(doc);
+    const locker = extractProductLocker(doc);
     const rating = extractProductRating(doc);
     const urlData = parseURLData(url, doc);
 
@@ -139,8 +143,12 @@ function extractProductData(source, url) {
         price: priceData,
         images: imageData,
         variant,
+        variants,
         availability,
         shipping,
+        delivery,
+        store,
+        locker,
         rating,
         url: urlData,
         metadata: {
@@ -151,6 +159,189 @@ function extractProductData(source, url) {
     };
 
     return productData;
+}
+
+/**
+ * Extracts ALL selected variant dimensions (color, size, style, …) for the current ASIN.
+ *
+ * Amazon renders each selected dimension as a span whose id is
+ * `inline-twister-expanded-dimension-text-<dimension>_name` (e.g. `…-color_name`), with the
+ * human value as text (e.g. "Beige-4 Rolls"). Variant combinations are usually distinct child
+ * ASINs (see docs/.../AMAZON_URL_ANATOMY.md §Product Variants), so this reads the dimensions
+ * selected on the current page.
+ *
+ * @param {Document} doc - DOM document
+ * @returns {Array<{dimension: string, value: string}>} Ordered dimensions ([] when none)
+ *
+ * @example
+ * // Returns: [{ dimension: 'color', value: 'Beige-4 Rolls' }, { dimension: 'size', value: '15 yards' }]
+ */
+function extractProductVariants(doc) {
+    const out = [];
+    try {
+        const spans = safeQueryAll('span[id^="inline-twister-expanded-dimension-text-"]', doc);
+        for (const span of spans) {
+            const id = (span && span.id) || '';
+            const match = id.match(/^inline-twister-expanded-dimension-text-(.+?)_name$/);
+            if (!match) continue;
+            const dimension = match[1];
+            const value = safeText(span);
+            if (dimension && value) {
+                out.push({ dimension, value });
+            }
+        }
+    } catch (error) {
+        // Variants are optional
+    }
+    return out;
+}
+
+/**
+ * Converts an Amazon delivery-time string into a whole number of days from today.
+ * @param {string|null} text - e.g. "Today", "Today 2 PM - 6 PM", "Tomorrow, June 1", "Thursday, June 4"
+ * @returns {number|null} Days from today (0 = today, 1 = tomorrow), or null if unparseable
+ */
+function deliveryTimeToDays(text) {
+    if (!text || typeof text !== 'string') {
+        return null;
+    }
+    const trimmed = text.trim();
+    if (/today/i.test(trimmed)) return 0;
+    if (/tomorrow/i.test(trimmed)) return 1;
+
+    // Match an explicit month + day (ignores any leading weekday like "Thursday, ")
+    const match = trimmed.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i);
+    if (!match) {
+        return null;
+    }
+    const months = {
+        january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+        july: 6, august: 7, september: 8, october: 9, november: 10, december: 11
+    };
+    const monthIdx = months[match[1].toLowerCase()];
+    const day = parseInt(match[2], 10);
+    if (monthIdx === undefined || isNaN(day)) {
+        return null;
+    }
+
+    try {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        let target = new Date(now.getFullYear(), monthIdx, day);
+        // If the parsed date already passed, it must refer to next year (year rollover)
+        if (target.getTime() < today.getTime()) {
+            target = new Date(now.getFullYear() + 1, monthIdx, day);
+        }
+        const days = Math.round((target.getTime() - today.getTime()) / 86400000);
+        return days >= 0 ? days : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Extracts delivery information from the primary delivery-message slot.
+ *
+ * The slot `#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE` holds a span carrying
+ * `data-csa-c-delivery-*` attributes (time, price, type, benefit program). See the user's notes in
+ * the planning references for the full attribute list.
+ *
+ * @param {Document} doc - DOM document
+ * @returns {Object|null} { actual, inDays, price, type, program, isPrime } or null
+ */
+function extractProductDelivery(doc) {
+    try {
+        const slot = safeQuery('#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE', doc);
+        if (!slot) {
+            return null;
+        }
+        const span = slot.querySelector('[data-csa-c-delivery-time]');
+        if (!span) {
+            return null;
+        }
+        const actual = safeAttr(span, 'data-csa-c-delivery-time');
+        const price = safeAttr(span, 'data-csa-c-delivery-price');
+        const type = safeAttr(span, 'data-csa-c-delivery-type');
+        const program = safeAttr(span, 'data-csa-c-delivery-benefit-program-id');
+        return {
+            actual: actual || null,
+            inDays: deliveryTimeToDays(actual),
+            price: price || null,
+            type: type || null,
+            program: program || null,
+            isPrime: (program || '').toLowerCase() === 'prime'
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Extracts the product's store/brand storefront link from the byline.
+ * @param {Document} doc - DOM document
+ * @returns {Object|null} { name, url } or null
+ */
+function extractProductStore(doc) {
+    try {
+        // Prefer a byline link that points at a storefront; fall back to any /stores/ link.
+        const link = safeQuery('#bylineInfo[href*="/stores/"]', doc) ||
+                     safeQuery('#bylineInfo a[href*="/stores/"]', doc) ||
+                     safeQuery('a#bylineInfo[href*="/stores/"]', doc) ||
+                     safeQuery('a[href*="/stores/"]', doc);
+        if (!link) {
+            return null;
+        }
+        const name = safeText(link);
+        const href = safeAttr(link, 'href');
+        if (!href) {
+            return null;
+        }
+        let url = href;
+        try {
+            url = new URL(href, 'https://www.amazon.com').toString();
+        } catch (error) {
+            // keep raw href
+        }
+        return { name: name || null, url };
+    } catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Extracts Amazon Locker shipping state (when the user's address is a locker).
+ * @param {Document} doc - DOM document
+ * @returns {Object|null} { isLocker, name, location, cannotShipReason } or null when no locker signal
+ */
+function extractProductLocker(doc) {
+    try {
+        const result = { isLocker: false, name: null, location: null, cannotShipReason: null };
+
+        const lockerLink = safeQuery('#contextualIngressPtLink', doc);
+        const ariaLabel = lockerLink ? safeAttr(lockerLink, 'aria-label') : null;
+        if (ariaLabel && /amazon locker/i.test(ariaLabel)) {
+            result.isLocker = true;
+            // e.g. "Amazon Locker - Frio - Boise 83703" -> name="Frio", location="Boise 83703"
+            const parts = ariaLabel.split(' - ');
+            if (parts.length >= 3) {
+                result.name = parts[1].trim();
+                result.location = parts.slice(2).join(' - ').trim();
+            }
+        }
+
+        // "cannot ship to this locker" reason lives as an error span in the delivery slot
+        const errorSpan = safeQuery('#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-color-error', doc);
+        if (errorSpan) {
+            result.cannotShipReason = safeText(errorSpan);
+        }
+
+        if (!result.isLocker && !result.cannotShipReason) {
+            return null;
+        }
+        return result;
+    } catch (error) {
+        return null;
+    }
 }
 
 /**
@@ -408,16 +599,18 @@ function extractProductRating(doc) {
 
         const ratingValue = parseFloat(ratingMatch[1]);
 
-        // Extract review count
+        // Extract review count. The count element text varies ("653 global ratings", "(653)",
+        // aria-label "653 Reviews"), so take the first integer rather than requiring a trailing
+        // "ratings" keyword. Prefer aria-label when present, then visible text.
         let reviewCount = null;
         const countElement = safeQuery('[data-hook="total-review-count"]', doc) ||
                             safeQuery('#acrCustomerReviewText', doc);
         if (countElement) {
-            const countText = safeText(countElement);
+            const countText = safeAttr(countElement, 'aria-label') || safeText(countElement);
             if (countText) {
-                const countMatch = countText.match(/([\d,]+)\s*ratings?/i);
+                const countMatch = countText.match(/([\d,]+)/);
                 if (countMatch) {
-                    reviewCount = parseInt(countMatch[1].replace(/,/g, ''));
+                    reviewCount = parseInt(countMatch[1].replace(/,/g, ''), 10);
                 }
             }
         }
@@ -538,30 +731,110 @@ function parseHTMLString(htmlString) {
     return null;
 }
 
-// Placeholder functions - these would be imported from shared_extractor and helpers
-function extractProductASIN(doc, url) { /* Implementation in shared_extractor.js */ return null; }
-function extractProductTitle(doc) { /* Implementation in shared_extractor.js */ return null; }
-function cleanProductTitle(title) { /* Implementation in shared_extractor.js */ return title; }
-function extractProductBrand(doc) { /* Implementation in shared_extractor.js */ return null; }
-function extractProductDescription(doc) { /* Implementation in shared_extractor.js */ return null; }
-function extractProductPrice(doc) { /* Implementation in shared_extractor.js */ return null; }
-function extractProductImageURL(doc) { /* Implementation in shared_extractor.js */ return null; }
-function extractProductVariant(doc) { /* Implementation in shared_extractor.js */ return null; }
-function safeQuery(selector, context) { /* Implementation in dom_helpers.js */ return null; }
-function safeQueryAll(selector, context) { /* Implementation in dom_helpers.js */ return []; }
-function safeText(element) { /* Implementation in dom_helpers.js */ return null; }
-function safeAttr(element, attr) { /* Implementation in dom_helpers.js */ return null; }
-function isAmazonImageURL(url) { /* Implementation in validation_helpers.js */ return false; }
-function logWarn(...args) { /* Implementation in logging_helpers.js */ }
-function logError(...args) { /* Implementation in logging_helpers.js */ }
+// ---------------------------------------------------------------------------
+// Module wiring
+//
+// The per-field extractors (ASIN/title/price/variant/…) live in shared_extractor.js.
+// Resolve that module at CALL time — in the browser via the registry that shared_extractor
+// populates on load (window.__AmazonToolkitModules), in Node via require — so that
+// extractProductData() runs the REAL implementations instead of null stubs.
+// The DOM helpers are tiny querySelector wrappers, implemented locally.
+// ---------------------------------------------------------------------------
+
+function getSharedExtractor() {
+    if (typeof window !== 'undefined' && window.__AmazonToolkitModules) {
+        return window.__AmazonToolkitModules['extractors/shared_extractor'] || {};
+    }
+    try {
+        return require('./shared_extractor');
+    } catch (error) {
+        return {};
+    }
+}
+
+function extractProductASIN(doc, url) {
+    const shared = getSharedExtractor();
+    return typeof shared.extractProductASIN === 'function' ? shared.extractProductASIN(doc, url) : null;
+}
+function extractProductTitle(doc) {
+    const shared = getSharedExtractor();
+    return typeof shared.extractProductTitle === 'function' ? shared.extractProductTitle(doc) : null;
+}
+function cleanProductTitle(title) {
+    const shared = getSharedExtractor();
+    return typeof shared.cleanProductTitle === 'function' ? shared.cleanProductTitle(title) : title;
+}
+function extractProductBrand(doc) {
+    const shared = getSharedExtractor();
+    return typeof shared.extractProductBrand === 'function' ? shared.extractProductBrand(doc) : null;
+}
+function extractProductDescription(doc) {
+    const shared = getSharedExtractor();
+    return typeof shared.extractProductDescription === 'function' ? shared.extractProductDescription(doc) : null;
+}
+function extractProductPrice(doc) {
+    const shared = getSharedExtractor();
+    return typeof shared.extractProductPrice === 'function' ? shared.extractProductPrice(doc) : null;
+}
+function extractProductImageURL(doc) {
+    const shared = getSharedExtractor();
+    return typeof shared.extractProductImageURL === 'function' ? shared.extractProductImageURL(doc) : null;
+}
+function extractProductVariant(doc) {
+    const shared = getSharedExtractor();
+    return typeof shared.extractProductVariant === 'function' ? shared.extractProductVariant(doc) : null;
+}
+
+// Local DOM helpers — mirror shared_extractor's private querySelector wrappers.
+function safeQuery(selector, context = (typeof document !== 'undefined' ? document : null)) {
+    try {
+        return context ? context.querySelector(selector) : null;
+    } catch (error) {
+        return null;
+    }
+}
+function safeQueryAll(selector, context = (typeof document !== 'undefined' ? document : null)) {
+    try {
+        return context ? Array.from(context.querySelectorAll(selector)) : [];
+    } catch (error) {
+        return [];
+    }
+}
+function safeText(element) {
+    if (!element) return null;
+    const text = element.textContent || '';
+    return text.trim() || null;
+}
+function safeAttr(element, attr) {
+    if (!element) return null;
+    const value = element.getAttribute(attr);
+    return value ? value.trim() : null;
+}
+function isAmazonImageURL(value) {
+    if (!value || typeof value !== 'string') return false;
+    try {
+        const url = new URL(value);
+        const imageHosts = ['m.media-amazon.com', 'images-na.ssl-images-amazon.com', 'images-amazon.com', 'ecx.images-amazon.com'];
+        return imageHosts.some(host => url.hostname === host || url.hostname.endsWith('.' + host));
+    } catch (error) {
+        return false;
+    }
+}
+function logWarn(...args) { try { console.warn('[amazon_toolkit/product]', ...args); } catch (error) { /* noop */ } }
+function logError(...args) { try { console.error('[amazon_toolkit/product]', ...args); } catch (error) { /* noop */ } }
 
 const ProductExtractor = {
     extractProductData,
     extractProductPriceData,
     extractProductImageData,
     extractProductImageID,
+    extractProductVariants,
     extractProductAvailability,
     extractProductShipping,
+    extractProductDelivery,
+    deliveryTimeToDays,
+    extractProductStore,
+    extractProductLocker,
     extractProductRating,
     parseProductPriceValue,
     extractProductCurrency,

@@ -648,8 +648,12 @@
         const priceData = extractProductPriceData(doc);
         const imageData = extractProductImageData(doc);
         const variant = extractProductVariant(doc);
+        const variants = extractProductVariants(doc);
         const availability = extractProductAvailability(doc);
         const shipping = extractProductShipping(doc);
+        const delivery = extractProductDelivery(doc);
+        const store = extractProductStore(doc);
+        const locker = extractProductLocker(doc);
         const rating = extractProductRating(doc);
         const urlData = parseURLData(url, doc);
         const productData = {
@@ -661,8 +665,12 @@
           price: priceData,
           images: imageData,
           variant,
+          variants,
           availability,
           shipping,
+          delivery,
+          store,
+          locker,
           rating,
           url: urlData,
           metadata: {
@@ -672,6 +680,139 @@
           }
         };
         return productData;
+      }
+      function extractProductVariants(doc) {
+        const out = [];
+        try {
+          const spans = safeQueryAll('span[id^="inline-twister-expanded-dimension-text-"]', doc);
+          for (const span of spans) {
+            const id = span && span.id || "";
+            const match = id.match(/^inline-twister-expanded-dimension-text-(.+?)_name$/);
+            if (!match) continue;
+            const dimension = match[1];
+            const value = safeText(span);
+            if (dimension && value) {
+              out.push({ dimension, value });
+            }
+          }
+        } catch (error) {
+        }
+        return out;
+      }
+      function deliveryTimeToDays(text) {
+        if (!text || typeof text !== "string") {
+          return null;
+        }
+        const trimmed = text.trim();
+        if (/today/i.test(trimmed)) return 0;
+        if (/tomorrow/i.test(trimmed)) return 1;
+        const match = trimmed.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i);
+        if (!match) {
+          return null;
+        }
+        const months = {
+          january: 0,
+          february: 1,
+          march: 2,
+          april: 3,
+          may: 4,
+          june: 5,
+          july: 6,
+          august: 7,
+          september: 8,
+          october: 9,
+          november: 10,
+          december: 11
+        };
+        const monthIdx = months[match[1].toLowerCase()];
+        const day = parseInt(match[2], 10);
+        if (monthIdx === void 0 || isNaN(day)) {
+          return null;
+        }
+        try {
+          const now = /* @__PURE__ */ new Date();
+          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          let target = new Date(now.getFullYear(), monthIdx, day);
+          if (target.getTime() < today.getTime()) {
+            target = new Date(now.getFullYear() + 1, monthIdx, day);
+          }
+          const days = Math.round((target.getTime() - today.getTime()) / 864e5);
+          return days >= 0 ? days : null;
+        } catch (error) {
+          return null;
+        }
+      }
+      function extractProductDelivery(doc) {
+        try {
+          const slot = safeQuery("#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE", doc);
+          if (!slot) {
+            return null;
+          }
+          const span = slot.querySelector("[data-csa-c-delivery-time]");
+          if (!span) {
+            return null;
+          }
+          const actual = safeAttr(span, "data-csa-c-delivery-time");
+          const price = safeAttr(span, "data-csa-c-delivery-price");
+          const type = safeAttr(span, "data-csa-c-delivery-type");
+          const program = safeAttr(span, "data-csa-c-delivery-benefit-program-id");
+          return {
+            actual: actual || null,
+            inDays: deliveryTimeToDays(actual),
+            price: price || null,
+            type: type || null,
+            program: program || null,
+            isPrime: (program || "").toLowerCase() === "prime"
+          };
+        } catch (error) {
+          return null;
+        }
+      }
+      function extractProductStore(doc) {
+        try {
+          const link = safeQuery('#bylineInfo[href*="/stores/"]', doc) || safeQuery('#bylineInfo a[href*="/stores/"]', doc) || safeQuery('a#bylineInfo[href*="/stores/"]', doc) || safeQuery('a[href*="/stores/"]', doc);
+          if (!link) {
+            return null;
+          }
+          const name = safeText(link);
+          const href = safeAttr(link, "href");
+          if (!href) {
+            return null;
+          }
+          let url = href;
+          try {
+            url = new URL(href, "https://www.amazon.com").toString();
+          } catch (error) {
+          }
+          return { name: name || null, url };
+        } catch (error) {
+          return null;
+        }
+      }
+      function extractProductLocker(doc) {
+        try {
+          const result = { isLocker: false, name: null, location: null, cannotShipReason: null };
+          const lockerLink = safeQuery("#contextualIngressPtLink", doc);
+          const ariaLabel = lockerLink ? safeAttr(lockerLink, "aria-label") : null;
+          if (ariaLabel && /amazon locker/i.test(ariaLabel)) {
+            result.isLocker = true;
+            const parts = ariaLabel.split(" - ");
+            if (parts.length >= 3) {
+              result.name = parts[1].trim();
+              result.location = parts.slice(2).join(" - ").trim();
+            }
+          }
+          const errorSpan = safeQuery("#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-color-error", doc);
+          if (errorSpan) {
+            result.cannotShipReason = safeText(errorSpan);
+          }
+          if (!result.isLocker && !result.cannotShipReason) {
+            return null;
+          }
+          return result;
+        } catch (error) {
+          return null;
+        }
       }
       function extractProductPriceData(doc) {
         const currentPrice = extractProductPrice(doc);
@@ -816,11 +957,11 @@
           let reviewCount = null;
           const countElement = safeQuery('[data-hook="total-review-count"]', doc) || safeQuery("#acrCustomerReviewText", doc);
           if (countElement) {
-            const countText = safeText(countElement);
+            const countText = safeAttr(countElement, "aria-label") || safeText(countElement);
             if (countText) {
-              const countMatch = countText.match(/([\d,]+)\s*ratings?/i);
+              const countMatch = countText.match(/([\d,]+)/);
               if (countMatch) {
-                reviewCount = parseInt(countMatch[1].replace(/,/g, ""));
+                reviewCount = parseInt(countMatch[1].replace(/,/g, ""), 10);
               }
             }
           }
@@ -888,56 +1029,106 @@
         }
         return null;
       }
+      function getSharedExtractor() {
+        if (typeof window !== "undefined" && window.__AmazonToolkitModules) {
+          return window.__AmazonToolkitModules["extractors/shared_extractor"] || {};
+        }
+        try {
+          return require_shared_extractor();
+        } catch (error) {
+          return {};
+        }
+      }
       function extractProductASIN(doc, url) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductASIN === "function" ? shared.extractProductASIN(doc, url) : null;
       }
       function extractProductTitle(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductTitle === "function" ? shared.extractProductTitle(doc) : null;
       }
       function cleanProductTitle(title) {
-        return title;
+        const shared = getSharedExtractor();
+        return typeof shared.cleanProductTitle === "function" ? shared.cleanProductTitle(title) : title;
       }
       function extractProductBrand(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductBrand === "function" ? shared.extractProductBrand(doc) : null;
       }
       function extractProductDescription(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductDescription === "function" ? shared.extractProductDescription(doc) : null;
       }
       function extractProductPrice(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductPrice === "function" ? shared.extractProductPrice(doc) : null;
       }
       function extractProductImageURL(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductImageURL === "function" ? shared.extractProductImageURL(doc) : null;
       }
       function extractProductVariant(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductVariant === "function" ? shared.extractProductVariant(doc) : null;
       }
-      function safeQuery(selector, context) {
-        return null;
+      function safeQuery(selector, context = typeof document !== "undefined" ? document : null) {
+        try {
+          return context ? context.querySelector(selector) : null;
+        } catch (error) {
+          return null;
+        }
       }
-      function safeQueryAll(selector, context) {
-        return [];
+      function safeQueryAll(selector, context = typeof document !== "undefined" ? document : null) {
+        try {
+          return context ? Array.from(context.querySelectorAll(selector)) : [];
+        } catch (error) {
+          return [];
+        }
       }
       function safeText(element) {
-        return null;
+        if (!element) return null;
+        const text = element.textContent || "";
+        return text.trim() || null;
       }
       function safeAttr(element, attr) {
-        return null;
+        if (!element) return null;
+        const value = element.getAttribute(attr);
+        return value ? value.trim() : null;
       }
-      function isAmazonImageURL(url) {
-        return false;
+      function isAmazonImageURL(value) {
+        if (!value || typeof value !== "string") return false;
+        try {
+          const url = new URL(value);
+          const imageHosts = ["m.media-amazon.com", "images-na.ssl-images-amazon.com", "images-amazon.com", "ecx.images-amazon.com"];
+          return imageHosts.some((host) => url.hostname === host || url.hostname.endsWith("." + host));
+        } catch (error) {
+          return false;
+        }
       }
       function logWarn(...args) {
+        try {
+          console.warn("[amazon_toolkit/product]", ...args);
+        } catch (error) {
+        }
       }
       function logError(...args) {
+        try {
+          console.error("[amazon_toolkit/product]", ...args);
+        } catch (error) {
+        }
       }
       var ProductExtractor = {
         extractProductData,
         extractProductPriceData,
         extractProductImageData,
         extractProductImageID,
+        extractProductVariants,
         extractProductAvailability,
         extractProductShipping,
+        extractProductDelivery,
+        deliveryTimeToDays,
+        extractProductStore,
+        extractProductLocker,
         extractProductRating,
         parseProductPriceValue,
         extractProductCurrency,
@@ -5201,6 +5392,97 @@ Open debugger to inspect?`;
       }, 600);
       logFunctionEnd("showClickFeedback");
     }
+    function isAmazonProductUrl(url) {
+      if (!url) return false;
+      const toolkit = getAmazonToolkit();
+      const fn = toolkit && toolkit.Helpers ? toolkit.Helpers.isAmazonProductURL : null;
+      if (typeof fn === "function") {
+        try {
+          return !!fn(url);
+        } catch (error) {
+        }
+      }
+      return /amazon\.[a-z.]+\/(?:[^/]+\/)?(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(url);
+    }
+    let amazonProductCacheKey = null;
+    let amazonProductCacheValue = null;
+    function getAmazonProductData(url) {
+      logFunctionBegin("getAmazonProductData");
+      if (!url) {
+        logFunctionEnd("getAmazonProductData");
+        return null;
+      }
+      if (amazonProductCacheKey === url && amazonProductCacheValue) {
+        log("Using cached Amazon product data");
+        logFunctionEnd("getAmazonProductData");
+        return amazonProductCacheValue;
+      }
+      const toolkit = getAmazonToolkit();
+      const extractFn = toolkit && toolkit.Extractors ? toolkit.Extractors.extractProductData : null;
+      if (typeof extractFn !== "function") {
+        log("Amazon toolkit extractProductData unavailable, skipping product details");
+        logFunctionEnd("getAmazonProductData");
+        return null;
+      }
+      let data = null;
+      try {
+        data = extractFn(document, url);
+      } catch (error) {
+        logError(`Amazon product extraction failed: ${error}`);
+      }
+      if (data) {
+        amazonProductCacheKey = url;
+        amazonProductCacheValue = data;
+        log("Extracted Amazon product data");
+      } else {
+        log("Amazon product extraction returned no data");
+      }
+      logFunctionEnd("getAmazonProductData");
+      return data;
+    }
+    function buildAmazonProductMarkdown(productData, cleanedUrl) {
+      logFunctionBegin("buildAmazonProductMarkdown");
+      if (!productData) {
+        logFunctionEnd("buildAmazonProductMarkdown");
+        return null;
+      }
+      const title = productData.titleCleaned || productData.title || "Amazon Product";
+      const url = cleanedUrl || productData.url && (productData.url.originalClean || productData.url.original) || "";
+      const lines = [`* [${title}](${url})`];
+      if (productData.price && productData.price.current) {
+        lines.push(`  * price: ${productData.price.current}`);
+      }
+      if (productData.delivery && Number.isFinite(productData.delivery.inDays)) {
+        lines.push(`  * delivers: ${productData.delivery.inDays}d`);
+      }
+      if (productData.rating && productData.rating.value != null) {
+        const count = productData.rating.count != null ? ` / ${productData.rating.count}` : "";
+        lines.push(`  * rating: ${productData.rating.value}${count}`);
+      }
+      if (Array.isArray(productData.variants)) {
+        const dimensionPriority = { color: 0, size: 1 };
+        const orderedVariants = productData.variants.map((entry, index) => ({ entry, index })).sort((a, b) => {
+          const pa = dimensionPriority[a.entry.dimension];
+          const pb = dimensionPriority[b.entry.dimension];
+          const ra = pa === void 0 ? 100 + a.index : pa;
+          const rb = pb === void 0 ? 100 + b.index : pb;
+          return ra - rb;
+        }).map((wrapped) => wrapped.entry);
+        orderedVariants.forEach((entry) => {
+          if (entry && entry.dimension && entry.value) {
+            lines.push(`  * ${entry.dimension}: ${entry.value}`);
+          }
+        });
+      }
+      if (productData.store && productData.store.url) {
+        const storeName = productData.store.name || "Store";
+        lines.push(`  * store: [${storeName}](${productData.store.url})`);
+      }
+      const markdown = lines.join("\n");
+      log(`Built Amazon product markdown (${lines.length} lines)`);
+      logFunctionEnd("buildAmazonProductMarkdown");
+      return markdown;
+    }
     function createMenu(x, y, isAnchor, anchor = null) {
       logFunctionBegin("createMenu");
       log(`Will create menu at position (${x}, ${y}), isAnchor: ${isAnchor}`);
@@ -5314,6 +5596,32 @@ Open debugger to inspect?`;
             log(`Queueing YouTube option: ${optionDescriptor.label}`);
             domainSectionOptions.push(optionDescriptor);
           });
+        }
+      }
+      if (capturedUrl && isAmazonProductUrl(capturedUrl)) {
+        log("Amazon product URL detected, will build product details option");
+        let amazonProductData = null;
+        try {
+          amazonProductData = getAmazonProductData(capturedUrl);
+        } catch (error) {
+          logError(`Amazon product evaluation failed (non-fatal): ${error}`);
+        }
+        const amazonBlock = amazonProductData ? buildAmazonProductMarkdown(amazonProductData, capturedUrl) : null;
+        if (amazonBlock) {
+          const amazonTitle = amazonProductData.titleCleaned || amazonProductData.title || "Product details";
+          domainSectionOptions.push({
+            isSectionHeader: true,
+            label: "Amazon"
+          });
+          domainSectionOptions.push({
+            label: "Amazon Product",
+            displayValue: amazonTitle,
+            getValue: () => amazonBlock,
+            isAllLinks: true
+          });
+          log("Queued Amazon Product details option");
+        } else {
+          log("No Amazon product details available for this URL");
         }
       }
       if (!isAnchor && !youtubeContext) {
