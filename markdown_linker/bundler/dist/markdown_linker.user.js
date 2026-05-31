@@ -5204,8 +5204,8 @@ Open debugger to inspect?`;
     function createMenu(x, y, isAnchor, anchor = null) {
       logFunctionBegin("createMenu");
       log(`Will create menu at position (${x}, ${y}), isAnchor: ${isAnchor}`);
-      const capturedUrl = targetUrl;
-      log(`Captured URL for menu: "${capturedUrl}"`);
+      const capturedUrl = cleanUrl(targetUrl) || targetUrl;
+      log(`Captured URL for menu (cleaned): "${capturedUrl}"`);
       let youtubeContext = null;
       if (capturedUrl) {
         log("Will evaluate YouTube context for captured URL");

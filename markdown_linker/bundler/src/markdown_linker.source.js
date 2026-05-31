@@ -2800,8 +2800,14 @@
         
         // Capture the current targetUrl value at menu creation time
         // This prevents issues if the global targetUrl is cleared before menu item is clicked
-        const capturedUrl = targetUrl;
-        log(`Captured URL for menu: "${capturedUrl}"`);
+        //
+        // Clean it HERE so this is the single chokepoint for both anchor and page paths: the
+        // page-click branches (handleClick / handleContextMenu / handleKeydown) set targetUrl to
+        // the raw window.location.href without cleaning, which left long Amazon product URLs
+        // (slug path + crid/sprefix/sr/sp_csd tracking) in the menu output. cleanUrl is
+        // idempotent, so re-cleaning an already-cleaned anchor URL is a no-op.
+        const capturedUrl = cleanUrl(targetUrl) || targetUrl;
+        log(`Captured URL for menu (cleaned): "${capturedUrl}"`);
 
         let youtubeContext = null;
         if (capturedUrl) {
