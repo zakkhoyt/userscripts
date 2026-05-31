@@ -658,6 +658,323 @@
 
         return context;
     }
+    /**
+     * Computes intent for building a YouTube context (video/playlist/channel) and cache key
+     * @param {string} url - Target URL selected by the user
+     * @param {object} toolkit - Loaded YouTube toolkit namespace
+     * @returns {object} Context intent metadata
+     */
+    function buildYouTubeContextIntent(url, toolkit) {
+        logFunctionBegin('buildYouTubeContextIntent');
+        if (!url || !toolkit) {
+            log('Missing URL or toolkit for YouTube context intent');
+            logFunctionEnd('buildYouTubeContextIntent');
+            return { key: null };
+        }
+
+        const pageStateExtractor = toolkit?.Extractors?.PageState;
+        const videoExtractor = toolkit?.Extractors?.Video;
+        if (!pageStateExtractor || !videoExtractor) {
+            log('Toolkit missing PageState or Video extractors');
+            logFunctionEnd('buildYouTubeContextIntent');
+            return { key: null };
+        }
+
+        let targetUrl;
+        let currentUrl;
+        try {
+            targetUrl = new URL(url, window.location.href);
+            currentUrl = new URL(window.location.href);
+        } catch (error) {
+            logWarn(`Failed to parse URLs for context intent: ${error.message}`);
+            logFunctionEnd('buildYouTubeContextIntent');
+            return { key: null };
+        }
+
+        const isCurrentYouTube = pageStateExtractor.isYouTubeHost(currentUrl.toString());
+        const isTargetYouTube = pageStateExtractor.isYouTubeHost(targetUrl.toString());
+        if (!isCurrentYouTube || !isTargetYouTube) {
+            log('Either current or target URL is not a YouTube host');
+            logFunctionEnd('buildYouTubeContextIntent');
+            return { key: null };
+        }
+
+        const targetVideoId = videoExtractor.getVideoIdFromUrl(targetUrl.toString());
+        const currentVideoId = videoExtractor.getVideoIdFromUrl(currentUrl.toString());
+        const sameVideo = Boolean(targetVideoId && currentVideoId && targetVideoId === currentVideoId);
+
+        let targetPlaylistId = videoExtractor.getPlaylistIdFromUrl(targetUrl.toString());
+        const currentPlaylistId = videoExtractor.getPlaylistIdFromUrl(currentUrl.toString());
+        if (!targetPlaylistId && sameVideo) {
+            targetPlaylistId = currentPlaylistId;
+        }
+        const samePlaylist = Boolean(targetPlaylistId && currentPlaylistId && targetPlaylistId === currentPlaylistId);
+
+        const sameChannel = currentUrl.pathname === targetUrl.pathname &&
+            (currentUrl.pathname.startsWith('/channel/') || currentUrl.pathname.startsWith('/@'));
+
+        let key = null;
+        if (sameVideo) {
+            key = `video:${currentVideoId}:${currentPlaylistId || ''}`;
+        } else if (samePlaylist) {
+            key = `playlist:${targetPlaylistId || currentPlaylistId}`;
+        } else if (sameChannel) {
+            key = `channel:${currentUrl.pathname}`;
+        }
+
+        log(`YouTube context key computed: ${key || 'none'}`);
+        logFunctionEnd('buildYouTubeContextIntent');
+        return {
+            key,
+            sameVideo,
+            samePlaylist,
+            sameChannel,
+            playlistId: currentPlaylistId || targetPlaylistId || null,
+        };
+    }
+
+    /**
+     * Builds (and caches) YouTube metadata for the current page when applicable
+     * @param {string|null} url - URL associated with the user action
+     * @returns {object|null} Extracted metadata (video/channel/playlist)
+     */
+    function getYouTubeContext(url) {
+        logFunctionBegin('getYouTubeContext');
+        if (!url || !isYouTubeUrl(url)) {
+            log('URL not eligible for YouTube context');
+            logFunctionEnd('getYouTubeContext');
+            return null;
+        }
+
+        const toolkit = getYouTubeToolkit();
+        if (!toolkit) {
+            log('YouTube toolkit unavailable, attempting DOM fallback context');
+            const fallbackContext = buildYouTubeFallbackContext(url);
+            logFunctionEnd('getYouTubeContext');
+            return fallbackContext;
+        }
+
+        const intent = buildYouTubeContextIntent(url, toolkit);
+        if (!intent.key) {
+            log('No valid YouTube context key, attempting fallback context');
+            const fallbackContext = buildYouTubeFallbackContext(url);
+            logFunctionEnd('getYouTubeContext');
+            return fallbackContext;
+        }
+
+        if (youtubeContextCacheKey === intent.key && youtubeContextCacheValue) {
+            log('Using cached YouTube context');
+            logFunctionEnd('getYouTubeContext');
+            return youtubeContextCacheValue;
+        }
+
+        const pageStateExtractor = toolkit?.Extractors?.PageState;
+        const videoExtractor = toolkit?.Extractors?.Video;
+        const playlistExtractor = toolkit?.Extractors?.Playlist;
+        const channelExtractor = toolkit?.Extractors?.Channel;
+
+        const context = {
+            video: null,
+            playlist: null,
+            playback: null,
+            channel: null,
+            pageState: null,
+        };
+
+        if (pageStateExtractor && typeof pageStateExtractor.determinePageState === 'function') {
+            context.pageState = pageStateExtractor.determinePageState(window.location.href, document);
+        }
+
+        if (intent.sameVideo && videoExtractor) {
+            context.video = videoExtractor.extractVideoMetadata(document, url);
+            context.playback = videoExtractor.extractPlaybackState(document);
+        }
+
+        const shouldAttachPlaylist = intent.samePlaylist ||
+            (intent.sameVideo && intent.playlistId) ||
+            context.pageState === 'playlist' ||
+            context.pageState === 'watch-with-playlist';
+        if (shouldAttachPlaylist && playlistExtractor) {
+            const playlistSourceUrl = intent.samePlaylist ? url : window.location.href;
+            context.playlist = playlistExtractor.extractPlaylistMetadata(document, playlistSourceUrl);
+        }
+
+        if (intent.sameChannel && channelExtractor) {
+            context.channel = channelExtractor.extractChannelMetadata(document, url);
+        }
+
+        if (!context.video && !context.playlist && !context.channel) {
+            log('YouTube context extraction produced no data, attempting fallback context');
+            const fallbackContext = buildYouTubeFallbackContext(url);
+            logFunctionEnd('getYouTubeContext');
+            return fallbackContext;
+        }
+
+        const enrichedContext = enrichYouTubeContextWithFallback(context, url);
+        youtubeContextCacheKey = intent.key;
+        youtubeContextCacheValue = enrichedContext;
+        log('Cached toolkit YouTube context');
+        logFunctionEnd('getYouTubeContext');
+        return enrichedContext;
+    }
+
+    /**
+     * Formats a consistent "YouTube: Channel - Title" string for video metadata
+     * @param {object} videoMeta - Metadata returned by the toolkit video extractor
+     * @returns {string|null} Formatted title when metadata present
+     */
+    function buildYouTubeVideoTitle(videoMeta) {
+        logFunctionBegin('buildYouTubeVideoTitle');
+        if (!videoMeta) {
+            log('Video metadata missing');
+            logFunctionEnd('buildYouTubeVideoTitle');
+            return null;
+        }
+        const channel = videoMeta.channelName || videoMeta.channelHandle || 'YouTube';
+        const title = videoMeta.title || 'Video';
+        const formatted = `YouTube: ${channel} - ${title}`;
+        log(`Formatted YouTube video title: "${formatted}"`);
+        logFunctionEnd('buildYouTubeVideoTitle');
+        return formatted;
+    }
+
+    /**
+     * Appends (or replaces) the t= query parameter in a URL for timestamp links
+     * @param {string} baseUrl - URL to modify
+     * @param {string} timestampValue - Value for the t parameter (examples: 283, 283s, 4m43s)
+     * @returns {string|null} URL with timestamp parameter applied
+     */
+    function buildYouTubeTimestampUrl(baseUrl, timestampValue) {
+        logFunctionBegin('buildYouTubeTimestampUrl');
+        if (!baseUrl || !timestampValue) {
+            log('Base URL or timestamp missing');
+            logFunctionEnd('buildYouTubeTimestampUrl');
+            return null;
+        }
+        try {
+            const urlObj = new URL(baseUrl, window.location.href);
+            urlObj.searchParams.set('t', timestampValue);
+            const result = urlObj.toString();
+            log(`Timestamp URL built: ${result}`);
+            logFunctionEnd('buildYouTubeTimestampUrl');
+            return result;
+        } catch (error) {
+            logWarn(`Failed to build timestamp URL via URL API: ${error.message}`);
+            const separator = baseUrl.includes('?') ? '&' : '?';
+            const fallback = `${baseUrl}${separator}t=${timestampValue}`;
+            log(`Using fallback timestamp URL: ${fallback}`);
+            logFunctionEnd('buildYouTubeTimestampUrl');
+            return fallback;
+        }
+    }
+
+    /**
+     * Builds menu option descriptors for timestamped video links
+     * @param {object} context - YouTube metadata context with playback information
+     * @param {string|null} baseTitle - Base title to prefix the timestamp suffix
+     * @param {string|null} fallbackUrl - URL to use when shortUrl is unavailable
+     * @returns {Array<object>} Menu option descriptors
+     */
+    function buildYouTubeTimestampMenuOptions(context, baseTitle, fallbackUrl) {
+        logFunctionBegin('buildYouTubeTimestampMenuOptions');
+        if (!context || !context.playback || !context.playback.isActive || !context.video) {
+            log('Timestamp prerequisites missing (context/playback/video)');
+            logFunctionEnd('buildYouTubeTimestampMenuOptions');
+            return [];
+        }
+
+        const seconds = context.playback.seconds;
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+            log('Playback seconds invalid for timestamp options');
+            logFunctionEnd('buildYouTubeTimestampMenuOptions');
+            return [];
+        }
+
+        const shortBase = context.video.shortUrl || fallbackUrl || context.video.canonicalUrl;
+        if (!shortBase) {
+            log('No base URL available for timestamp links');
+            logFunctionEnd('buildYouTubeTimestampMenuOptions');
+            return [];
+        }
+
+        const timestampDisplay = formatSecondsAsTimestamp(seconds) || `${Math.floor(seconds)}s`;
+        const decoratedBaseTitle = baseTitle || context.video.title || 'YouTube Video';
+        const decoratedTitle = `${decoratedBaseTitle} @ ${timestampDisplay}`;
+        const timestampUrl = buildYouTubeTimestampUrl(shortBase, `${Math.floor(seconds)}`);
+        if (!timestampUrl) {
+            log('Failed to build timestamp URL');
+            logFunctionEnd('buildYouTubeTimestampMenuOptions');
+            return [];
+        }
+
+        const option = {
+            label: 'Timestamp',
+            displayValue: decoratedTitle,
+            getResult: () => ({
+                title: decoratedTitle,
+                url: timestampUrl
+            })
+        };
+
+        log('Built 1 timestamp menu option');
+        logFunctionEnd('buildYouTubeTimestampMenuOptions');
+        return [option];
+    }
+
+    /**
+     * Returns the first non-empty text value from a list of selector/attribute descriptors
+     * @param {Array<{selector: string, attribute?: string}>} descriptors - Query descriptors to evaluate in order
+     * @param {string} contextLabel - Human-readable label for logging (e.g., "YouTube title")
+     * @returns {string|null} Trimmed text value or null if none found
+     */
+    function getFirstMatchingText(descriptors, contextLabel) {
+        logFunctionBegin('getFirstMatchingText');
+        if (!Array.isArray(descriptors) || descriptors.length === 0) {
+            log('Descriptor list empty');
+            logFunctionEnd('getFirstMatchingText');
+            return null;
+        }
+
+        for (let index = 0; index < descriptors.length; index += 1) {
+            const descriptor = descriptors[index];
+            if (!descriptor || !descriptor.selector) {
+                continue;
+            }
+            const element = document.querySelector(descriptor.selector);
+            if (!element) {
+                continue;
+            }
+            const rawValue = descriptor.attribute ? element.getAttribute(descriptor.attribute) : element.textContent;
+            const trimmedValue = rawValue ? rawValue.trim() : '';
+            if (trimmedValue) {
+                log(`Matched ${contextLabel} selector: ${descriptor.selector}`);
+                logFunctionEnd('getFirstMatchingText');
+                return trimmedValue;
+            }
+        }
+
+        log(`No ${contextLabel} selector produced text`);
+        logFunctionEnd('getFirstMatchingText');
+        return null;
+    }
+
+    /**
+     * Removes the trailing " - YouTube" suffix from titles when present
+     * @param {string|null} title - Title candidate to clean
+     * @returns {string|null} Title without suffix or null when input empty
+     */
+    function stripYouTubeTitleSuffix(title) {
+        if (!title) {
+            return null;
+        }
+        const trimmed = title.trim();
+        if (!trimmed) {
+            return null;
+        }
+        const stripped = trimmed.replace(/\s+-\s+YouTube$/i, '').trim();
+        return stripped || trimmed;
+    }
+
 
     /**
      * Generates YouTube-specific menu options (video titles, playlist lists, etc.)
@@ -2489,7 +2806,13 @@
         let youtubeContext = null;
         if (capturedUrl) {
             log('Will evaluate YouTube context for captured URL');
-            youtubeContext = getYouTubeContext(capturedUrl);
+            // Defensive: a YouTube toolkit/extractor failure must never abort core menu creation
+            try {
+                youtubeContext = getYouTubeContext(capturedUrl);
+            } catch (error) {
+                logError(`YouTube context evaluation failed (non-fatal): ${error}`);
+                youtubeContext = null;
+            }
             if (youtubeContext) {
                 log('YouTube context detected for menu');
             } else {
