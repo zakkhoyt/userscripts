@@ -198,7 +198,8 @@ function extractProductVariants(doc) {
 
 /**
  * Converts an Amazon delivery-time string into a whole number of days from today.
- * @param {string|null} text - e.g. "Today", "Today 2 PM - 6 PM", "Tomorrow, June 1", "Thursday, June 4"
+ * @param {string|null} text - e.g. "Today", "Today 2 PM - 6 PM", "Tomorrow, June 1",
+ *   "Thursday, June 4", "Overnight", "One-Day", "Two-Day"
  * @returns {number|null} Days from today (0 = today, 1 = tomorrow), or null if unparseable
  */
 function deliveryTimeToDays(text) {
@@ -208,6 +209,10 @@ function deliveryTimeToDays(text) {
     const trimmed = text.trim();
     if (/today/i.test(trimmed)) return 0;
     if (/tomorrow/i.test(trimmed)) return 1;
+    // Named delivery-speed labels (arrival relative to today).
+    if (/overnight/i.test(trimmed)) return 1;
+    if (/\b(?:one|next)[\s-]?day\b/i.test(trimmed)) return 1;
+    if (/\btwo[\s-]?day\b/i.test(trimmed)) return 2;
 
     // Match an explicit month + day (ignores any leading weekday like "Thursday, ")
     const match = trimmed.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i);
@@ -277,32 +282,48 @@ function extractProductDelivery(doc) {
 }
 
 /**
- * Extracts the product's store/brand storefront link from the byline.
+ * Extracts the product's brand link from the byline (`#bylineInfo`).
+ *
+ * The byline is the canonical brand attribution. It points either at a brand storefront
+ * (`/stores/...`, e.g. "Visit the OK TAPE Store") or, when the brand has no storefront, a brand
+ * search (`/s/...`, e.g. "Brand: ALLOLO"). We read ONLY the byline so we never pick up
+ * sponsored-product storefront links elsewhere on the page — those carry ad params
+ * (`aaxitk`/`aref`/`sref`) and render as "Click to learn more about this sponsored product".
+ *
  * @param {Document} doc - DOM document
- * @returns {Object|null} { name, url } or null
+ * @returns {Object|null} `{ kind: 'store'|'search', name, url }` or null when no byline link
  */
 function extractProductStore(doc) {
     try {
-        // Prefer a byline link that points at a storefront; fall back to any /stores/ link.
-        const link = safeQuery('#bylineInfo[href*="/stores/"]', doc) ||
-                     safeQuery('#bylineInfo a[href*="/stores/"]', doc) ||
-                     safeQuery('a#bylineInfo[href*="/stores/"]', doc) ||
-                     safeQuery('a[href*="/stores/"]', doc);
-        if (!link) {
+        const byline = safeQuery('a#bylineInfo', doc) ||
+                       safeQuery('#bylineInfo a', doc) ||
+                       safeQuery('#bylineInfo', doc);
+        if (!byline) {
             return null;
         }
-        const name = safeText(link);
-        const href = safeAttr(link, 'href');
+        const href = safeAttr(byline, 'href');
         if (!href) {
             return null;
         }
+        const name = safeText(byline);
         let url = href;
+        let pathname = href;
         try {
-            url = new URL(href, 'https://www.amazon.com').toString();
+            const parsed = new URL(href, 'https://www.amazon.com');
+            url = parsed.toString();
+            pathname = parsed.pathname;
         } catch (error) {
             // keep raw href
         }
-        return { name: name || null, url };
+        // Classify the byline target: storefront vs. brand-search. `new URL('/s?k=x').pathname` is
+        // "/s"; `new URL('/s/ref=...').pathname` is "/s/ref=...". Default to 'store' for anything else.
+        let kind = 'store';
+        if (pathname.indexOf('/stores/') !== -1) {
+            kind = 'store';
+        } else if (pathname === '/s' || pathname.indexOf('/s/') === 0) {
+            kind = 'search';
+        }
+        return { kind, name: name || null, url };
     } catch (error) {
         return null;
     }

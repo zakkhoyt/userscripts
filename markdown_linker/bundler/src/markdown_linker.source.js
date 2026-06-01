@@ -2349,6 +2349,19 @@
                 log(`Sanitized buffered URL: "${resolvedUrl}"`);
             }
 
+            // Domain-specific output supersedes the preferred title format. For an Amazon product on
+            // the current page, emit the full details block (a bullet list that fits both single-copy
+            // and multi-item list output). Anchors to OTHER products fall through to the title — their
+            // details are not present in the current DOM.
+            if (shouldEmitAmazonProductBlock(resolvedUrl, !item.anchor)) {
+                const amazonData = getAmazonProductData(resolvedUrl);
+                const amazonBlock = amazonData ? buildAmazonProductMarkdown(amazonData, resolvedUrl) : null;
+                if (amazonBlock) {
+                    log('Buffered item is an Amazon product on the current page; using details block');
+                    return amazonBlock;
+                }
+            }
+
             const titleSourceUrl = item.url || resolvedUrl;
             const title = getAutoInferredTitle(item.anchor, titleSourceUrl);
             if (!title) {
@@ -2794,6 +2807,46 @@
         return /amazon\.[a-z.]+\/(?:[^/]+\/)?(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(url);
     }
 
+    /**
+     * True when `url`'s product ASIN matches the CURRENT page's product ASIN. The details block is
+     * built from the live `document`, so it is only valid for the product we are actually viewing —
+     * not for an anchor that links to a different product (which would mix that ASIN with the
+     * current page's price/variants).
+     * @param {string} url - Target URL to compare against the current page
+     * @returns {boolean}
+     */
+    function amazonAsinMatchesCurrentPage(url) {
+        const toolkit = getAmazonToolkit();
+        const extractors = toolkit && toolkit.Extractors;
+        if (!extractors || typeof extractors.extractProductASIN !== 'function') {
+            return false;
+        }
+        const pageUrl = (typeof window !== 'undefined' && window.location && window.location.href) || '';
+        let targetAsin = null;
+        let pageAsin = null;
+        try { targetAsin = extractors.extractProductASIN(document, url); } catch (error) { /* noop */ }
+        try { pageAsin = extractors.extractProductASIN(document, pageUrl); } catch (error) { /* noop */ }
+        return !!targetAsin && targetAsin === pageAsin;
+    }
+
+    /**
+     * Whether to emit the Amazon details block for `url`. Allowed for a page-level action (no
+     * anchor) on an Amazon product — `document` is that product — or for an anchor whose ASIN
+     * matches the current page (e.g. the product's own title/image link).
+     * @param {string} url - Target (cleaned) URL
+     * @param {boolean} isPageAction - True when triggered on the page itself (not an anchor elsewhere)
+     * @returns {boolean}
+     */
+    function shouldEmitAmazonProductBlock(url, isPageAction) {
+        if (!url || !isAmazonProductUrl(url)) {
+            return false;
+        }
+        if (isPageAction) {
+            return true;
+        }
+        return amazonAsinMatchesCurrentPage(url);
+    }
+
     // Cache the last extraction so re-opening the menu on the same URL does not re-walk the DOM.
     let amazonProductCacheKey = null;
     let amazonProductCacheValue = null;
@@ -2897,8 +2950,12 @@
             });
         }
         if (productData.store && productData.store.url) {
-            const storeName = productData.store.name || 'Store';
-            lines.push(`  * store: [${storeName}](${productData.store.url})`);
+            // The byline is either a brand storefront ("store") or a brand search ("search",
+            // e.g. "Brand: ALLOLO"). Label the line by kind so search links aren't mislabeled.
+            const isSearch = productData.store.kind === 'search';
+            const label = isSearch ? 'search' : 'store';
+            const storeName = productData.store.name || (isSearch ? 'Brand' : 'Store');
+            lines.push(`  * ${label}: [${storeName}](${productData.store.url})`);
         }
 
         const markdown = lines.join('\n');
@@ -3082,8 +3139,8 @@
             }
         }
 
-        if (capturedUrl && isAmazonProductUrl(capturedUrl)) {
-            log('Amazon product URL detected, will build product details option');
+        if (shouldEmitAmazonProductBlock(capturedUrl, !isAnchor)) {
+            log('Amazon product detected for current page, will build product details option');
             let amazonProductData = null;
             try {
                 amazonProductData = getAmazonProductData(capturedUrl);

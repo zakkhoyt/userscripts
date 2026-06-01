@@ -430,14 +430,33 @@
         } catch (error) {
         }
         try {
-          const selectors = [
-            ".a-price .a-offscreen",
-            "#priceblock_ourprice",
-            "#priceblock_dealprice",
-            "#priceblock_saleprice",
-            ".a-price-whole"
-          ];
-          for (const selector of selectors) {
+          const offscreenElement = safeQuery(".a-price .a-offscreen", doc);
+          if (offscreenElement) {
+            const text = safeText(offscreenElement);
+            if (text && isValidPrice(text)) {
+              return text;
+            }
+          }
+        } catch (error) {
+        }
+        try {
+          const wholeElement = safeQuery(".a-price-whole", doc);
+          if (wholeElement) {
+            const whole = (safeText(wholeElement) || "").replace(/[^\d]/g, "");
+            if (whole) {
+              const scope = wholeElement.parentElement || doc;
+              const symbolRaw = safeText(safeQuery(".a-price-symbol", scope)) || "$";
+              const symbol = symbolRaw.replace(/\s/g, "") || "$";
+              const fractionElement = safeQuery(".a-price-fraction", scope);
+              const fraction = fractionElement ? (safeText(fractionElement) || "").replace(/[^\d]/g, "") : "";
+              return fraction ? `${symbol}${whole}.${fraction}` : `${symbol}${whole}`;
+            }
+          }
+        } catch (error) {
+        }
+        try {
+          const legacySelectors = ["#priceblock_ourprice", "#priceblock_dealprice", "#priceblock_saleprice"];
+          for (const selector of legacySelectors) {
             const element = safeQuery(selector, doc);
             if (element) {
               const text = safeText(element);
@@ -706,6 +725,9 @@
         const trimmed = text.trim();
         if (/today/i.test(trimmed)) return 0;
         if (/tomorrow/i.test(trimmed)) return 1;
+        if (/overnight/i.test(trimmed)) return 1;
+        if (/\b(?:one|next)[\s-]?day\b/i.test(trimmed)) return 1;
+        if (/\btwo[\s-]?day\b/i.test(trimmed)) return 2;
         const match = trimmed.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i);
         if (!match) {
           return null;
@@ -770,21 +792,30 @@
       }
       function extractProductStore(doc) {
         try {
-          const link = safeQuery('#bylineInfo[href*="/stores/"]', doc) || safeQuery('#bylineInfo a[href*="/stores/"]', doc) || safeQuery('a#bylineInfo[href*="/stores/"]', doc) || safeQuery('a[href*="/stores/"]', doc);
-          if (!link) {
+          const byline = safeQuery("a#bylineInfo", doc) || safeQuery("#bylineInfo a", doc) || safeQuery("#bylineInfo", doc);
+          if (!byline) {
             return null;
           }
-          const name = safeText(link);
-          const href = safeAttr(link, "href");
+          const href = safeAttr(byline, "href");
           if (!href) {
             return null;
           }
+          const name = safeText(byline);
           let url = href;
+          let pathname = href;
           try {
-            url = new URL(href, "https://www.amazon.com").toString();
+            const parsed = new URL(href, "https://www.amazon.com");
+            url = parsed.toString();
+            pathname = parsed.pathname;
           } catch (error) {
           }
-          return { name: name || null, url };
+          let kind = "store";
+          if (pathname.indexOf("/stores/") !== -1) {
+            kind = "store";
+          } else if (pathname === "/s" || pathname.indexOf("/s/") === 0) {
+            kind = "search";
+          }
+          return { kind, name: name || null, url };
         } catch (error) {
           return null;
         }
@@ -5174,6 +5205,14 @@ Open debugger to inspect?`;
         if (resolvedUrl !== item.url) {
           log(`Sanitized buffered URL: "${resolvedUrl}"`);
         }
+        if (shouldEmitAmazonProductBlock(resolvedUrl, !item.anchor)) {
+          const amazonData = getAmazonProductData(resolvedUrl);
+          const amazonBlock = amazonData ? buildAmazonProductMarkdown(amazonData, resolvedUrl) : null;
+          if (amazonBlock) {
+            log("Buffered item is an Amazon product on the current page; using details block");
+            return amazonBlock;
+          }
+        }
         const titleSourceUrl = item.url || resolvedUrl;
         const title = getAutoInferredTitle(item.anchor, titleSourceUrl);
         if (!title) {
@@ -5404,6 +5443,34 @@ Open debugger to inspect?`;
       }
       return /amazon\.[a-z.]+\/(?:[^/]+\/)?(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(url);
     }
+    function amazonAsinMatchesCurrentPage(url) {
+      const toolkit = getAmazonToolkit();
+      const extractors = toolkit && toolkit.Extractors;
+      if (!extractors || typeof extractors.extractProductASIN !== "function") {
+        return false;
+      }
+      const pageUrl = typeof window !== "undefined" && window.location && window.location.href || "";
+      let targetAsin = null;
+      let pageAsin = null;
+      try {
+        targetAsin = extractors.extractProductASIN(document, url);
+      } catch (error) {
+      }
+      try {
+        pageAsin = extractors.extractProductASIN(document, pageUrl);
+      } catch (error) {
+      }
+      return !!targetAsin && targetAsin === pageAsin;
+    }
+    function shouldEmitAmazonProductBlock(url, isPageAction) {
+      if (!url || !isAmazonProductUrl(url)) {
+        return false;
+      }
+      if (isPageAction) {
+        return true;
+      }
+      return amazonAsinMatchesCurrentPage(url);
+    }
     let amazonProductCacheKey = null;
     let amazonProductCacheValue = null;
     function getAmazonProductData(url) {
@@ -5475,8 +5542,10 @@ Open debugger to inspect?`;
         });
       }
       if (productData.store && productData.store.url) {
-        const storeName = productData.store.name || "Store";
-        lines.push(`  * store: [${storeName}](${productData.store.url})`);
+        const isSearch = productData.store.kind === "search";
+        const label = isSearch ? "search" : "store";
+        const storeName = productData.store.name || (isSearch ? "Brand" : "Store");
+        lines.push(`  * ${label}: [${storeName}](${productData.store.url})`);
       }
       const markdown = lines.join("\n");
       log(`Built Amazon product markdown (${lines.length} lines)`);
@@ -5598,8 +5667,8 @@ Open debugger to inspect?`;
           });
         }
       }
-      if (capturedUrl && isAmazonProductUrl(capturedUrl)) {
-        log("Amazon product URL detected, will build product details option");
+      if (shouldEmitAmazonProductBlock(capturedUrl, !isAnchor)) {
+        log("Amazon product detected for current page, will build product details option");
         let amazonProductData = null;
         try {
           amazonProductData = getAmazonProductData(capturedUrl);
