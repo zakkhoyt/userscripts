@@ -32,12 +32,18 @@ Then call the client after writing to the clipboard (the caller computes the pat
 window.SourceCapture.capture({
     userscript: 'markdown_linker',
     files: [
-        { path: 'sources/products/B0DF7MW3SG.html', content: '<!DOCTYPE html>\n' + document.documentElement.outerHTML },
-        { path: 'logs/B0DF7MW3SG.log', content: window.SourceCapture.logBuffer.getText() }
+        { path: 'sources/products/B0DF7MW3SG_20260602134501.html', content: pageHtml },
+        { path: 'logs/B0DF7MW3SG_20260602134501.log', content: window.SourceCapture.logBuffer.getText() }
     ],
     onResult: (result) => { /* result.ok -> update notification; else log */ }
 });
 ```
+
+> [!NOTE]
+> Filenames, the timestamp suffix, and any metadata header in the content are **caller conventions**,
+> not requirements of this module — it writes exactly the `path`/`content` it is given. For example,
+> `markdown_linker` timestamps each capture (so they archive rather than overwrite) and prepends an
+> HTML comment recording the raw clicked URL, the format used, and the clipboard output.
 
 ## Running the server
 
@@ -50,7 +56,8 @@ common/source_capture/source_capture_server.zsh --port 9000 --token "$(uuidgen)"
 ```
 
 Files land under `<git-root>/.gitignored/<userscript>/<path>`, e.g.
-`.gitignored/markdown_linker/sources/products/B0DF7MW3SG.html`. Stop with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+`.gitignored/markdown_linker/sources/products/B0DF7MW3SG_20260602134501.html`. Stop with
+<kbd>Ctrl</kbd>+<kbd>C</kbd>.
 
 ## Protocol
 

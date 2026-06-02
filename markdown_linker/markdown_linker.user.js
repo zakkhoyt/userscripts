@@ -3816,7 +3816,7 @@ ${textLink}`;
     function bufferLog(line) {
       try {
         if (typeof window !== "undefined" && window.SourceCapture && window.SourceCapture.logBuffer) {
-          window.SourceCapture.logBuffer.push(line);
+          window.SourceCapture.logBuffer.push(`${(/* @__PURE__ */ new Date()).toISOString()} ${line}`);
         }
       } catch (error) {
       }
@@ -5049,7 +5049,10 @@ Open debugger to inspect?`;
         logFunctionEnd("handleSelectionAutoCopy");
         return false;
       }
-      copyToClipboard(markdown, selectedText, sanitizedUrl);
+      copyToClipboard(markdown, selectedText, sanitizedUrl, {
+        originalUrl: typeof window !== "undefined" && window.location && window.location.href || sanitizedUrl,
+        format: "selection"
+      });
       showNotification("Selection copied to clipboard");
       clearSelectionCache("selection auto copied");
       logFunctionEnd("handleSelectionAutoCopy");
@@ -5465,7 +5468,13 @@ Open debugger to inspect?`;
           log("Did copy to clipboard");
           showNotification(`Copied link to clipboard`);
           log(`Did show notification for 1 link`);
-          maybeCaptureSources();
+          const captureItem = buffer[0];
+          const captureResolvedUrl = cleanUrl(captureItem.url) || captureItem.url;
+          maybeCaptureSources({
+            originalUrl: captureItem.anchor && captureItem.anchor.href ? captureItem.anchor.href : captureItem.url,
+            format: shouldEmitAmazonProductBlock(captureResolvedUrl, !captureItem.anchor) ? "amazon product" : getAltZOption(altZTitlePreference).label.toLowerCase(),
+            output: fullMarkdown
+          });
         } catch (error) {
           logError(`Failed to copy to clipboard: ${error}`);
           showNotification(`Failed to copy link - check console for errors`);
@@ -5485,7 +5494,11 @@ Open debugger to inspect?`;
           log("Did copy to clipboard");
           showNotification(`Copied ${buffer.length} links to clipboard`);
           log(`Did show notification for ${buffer.length} links`);
-          maybeCaptureSources();
+          maybeCaptureSources({
+            originalUrl: typeof window !== "undefined" && window.location && window.location.href || "",
+            format: `${getAltZOption(altZTitlePreference).label.toLowerCase()} (x${buffer.length})`,
+            output: fullMarkdown
+          });
         } catch (error) {
           logError(`Failed to copy to clipboard: ${error}`);
           showNotification(`Failed to copy ${buffer.length} links - check console for errors`);
@@ -5503,7 +5516,7 @@ Open debugger to inspect?`;
       logFunctionEnd("createMarkdown");
       return markdown;
     }
-    function copyToClipboard(markdown, title, url) {
+    function copyToClipboard(markdown, title, url, captureContext) {
       logFunctionBegin("copyToClipboard");
       log(`Will copy to clipboard: "${markdown}"`);
       try {
@@ -5515,7 +5528,12 @@ Open debugger to inspect?`;
         log("Will show notification");
         showNotification("Markdown link copied to clipboard!");
         log("Did show notification");
-        maybeCaptureSources();
+        const captureCtx = captureContext || {};
+        maybeCaptureSources({
+          originalUrl: captureCtx.originalUrl || url,
+          format: captureCtx.format || "link",
+          output: markdown
+        });
       } catch (error) {
         log(`ERROR: Failed to copy to clipboard: ${error}`);
         console.error(`${logBase}: Failed to copy to clipboard:`, error);
@@ -5632,7 +5650,12 @@ ${text}`;
         return "page";
       }
     }
-    function maybeCaptureSources() {
+    function captureTimestamp() {
+      const now = /* @__PURE__ */ new Date();
+      const pad = (value) => String(value).padStart(2, "0");
+      return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    }
+    function maybeCaptureSources(context) {
       if (captureMode !== "html_logs") {
         return;
       }
@@ -5643,7 +5666,11 @@ ${text}`;
         logFunctionEnd("maybeCaptureSources");
         return;
       }
+      const ctx = context || {};
       const pageUrl = typeof window !== "undefined" && window.location && window.location.href || "";
+      const originalUrl = ctx.originalUrl || pageUrl;
+      const format = ctx.format || "";
+      const output = ctx.output || "";
       let asin = null;
       const toolkit = getAmazonToolkit();
       if (toolkit && toolkit.Extractors && typeof toolkit.Extractors.extractProductASIN === "function") {
@@ -5661,9 +5688,17 @@ ${text}`;
         pageType = "other";
         baseName = buildCaptureSlug(pageUrl);
       }
-      const htmlPath = `sources/${pageType}/${baseName}.html`;
-      const logsPath = `logs/${baseName}.log`;
-      const html = `<!DOCTYPE html>
+      const timestamp = captureTimestamp();
+      const htmlPath = `sources/${pageType}/${baseName}_${timestamp}.html`;
+      const logsPath = `logs/${baseName}_${timestamp}.log`;
+      const commentBody = `* original_url: ${originalUrl}
+* format: ${format}
+
+${output}`.replace(/-->/g, "-- >");
+      const html = `<!--
+${commentBody}
+-->
+<!DOCTYPE html>
 ${document.documentElement.outerHTML}`;
       const logs = sourceCapture.logBuffer ? sourceCapture.logBuffer.getText() : "";
       log(`Will capture page source + logs -> ${htmlPath}, ${logsPath}`);
@@ -6126,7 +6161,11 @@ ${document.documentElement.outerHTML}`;
                 GM_setClipboard(allLinksMarkdown, "text/plain");
                 log("Did copy all links to clipboard");
                 showNotification("All page links copied to clipboard!");
-                maybeCaptureSources();
+                maybeCaptureSources({
+                  originalUrl: isAnchor && anchor ? anchor.href || capturedUrl : typeof window !== "undefined" && window.location && window.location.href || capturedUrl,
+                  format: (option.label || "").toLowerCase(),
+                  output: allLinksMarkdown
+                });
               } catch (error) {
                 logError(`Failed to copy all links: ${error}`);
                 alert("Failed to copy to clipboard. Check console for details.");
@@ -6151,7 +6190,10 @@ ${document.documentElement.outerHTML}`;
               if (markdown) {
                 log(`Did create markdown: "${markdown}"`);
                 log("Will copy to clipboard");
-                copyToClipboard(markdown, title, resolvedUrl);
+                copyToClipboard(markdown, title, resolvedUrl, {
+                  originalUrl: isAnchor && anchor ? anchor.href || resolvedUrl : typeof window !== "undefined" && window.location && window.location.href || resolvedUrl,
+                  format: (option.label || "").toLowerCase()
+                });
                 log("Did copy to clipboard");
               } else {
                 logError("Markdown creation failed (returned null)");
