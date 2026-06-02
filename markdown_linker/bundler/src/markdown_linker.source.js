@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_unregisterMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -93,6 +95,9 @@
     // Script identifier prefix for all console.log statements
     // Type: string
     let logBase = "markdown_linker";
+
+    // The currently visible notification element, so an async capture result can append a 2nd line.
+    let activeNotification = null;
     
     // Reference to currently displayed popup menu DOM element
     // Tracked globally to enable removal when user clicks outside or selects option
@@ -159,7 +164,33 @@
     ];
     let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
     let altZMenuCommandId = null;
+
+    // Source-capture preference: when "html & logs", every clipboard copy also POSTs the page
+    // source + session logs to the local capture server (common/source_capture). Default: none.
+    const CAPTURE_MODE_PREF_KEY = 'markdown_linker.capture_mode';
+    const CAPTURE_MODE_OPTIONS = [
+        { id: 'none', label: 'none' },
+        { id: 'html_logs', label: 'html & logs' }
+    ];
+    let captureMode = CAPTURE_MODE_OPTIONS[0].id;
+    let captureMenuCommandId = null;
     // ============================================================================
+
+    /**
+     * Mirrors a formatted log line into the SourceCapture buffer (when present) so captured `.log`
+     * files reflect the full session. Buffers regardless of `isDebug` (so captures are complete even
+     * when console logging is off). Safe no-op when the capture module is unavailable.
+     * @param {string} line - Already-formatted log line
+     */
+    function bufferLog(line) {
+        try {
+            if (typeof window !== 'undefined' && window.SourceCapture && window.SourceCapture.logBuffer) {
+                window.SourceCapture.logBuffer.push(line);
+            }
+        } catch (error) {
+            /* noop — logging must never throw */
+        }
+    }
 
     /**
      * Simple logging wrapper with consistent prefix
@@ -167,8 +198,10 @@
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Console/log
      */
     function log(message) {
+        const line = `${logBase}: ${message}`;
+        bufferLog(line);
         if (isDebug) {
-            console.log(`${logBase}: ${message}`);
+            console.log(line);
         }
     }
 
@@ -178,7 +211,9 @@
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Console/warn
      */
     function logWarn(message) {
-        console.warn(`${logBase}: ${message}`);
+        const line = `${logBase}: ${message}`;
+        bufferLog(`WARN ${line}`);
+        console.warn(line);
     }
 
     /**
@@ -187,7 +222,9 @@
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Console/error
      */
     function logError(message) {
-        console.error(`${logBase}: ${message}`);
+        const line = `${logBase}: ${message}`;
+        bufferLog(`ERROR ${line}`);
+        console.error(line);
     }
 
     /**
@@ -195,8 +232,10 @@
      * @param {string} functionName - Name of the function being entered
      */
     function logFunctionBegin(functionName) {
+        const line = `${logBase}: begin ${functionName}`;
+        bufferLog(line);
         if (isDebug) {
-            console.log(`${logBase}: begin ${functionName}`);
+            console.log(line);
         }
     }
 
@@ -205,8 +244,10 @@
      * @param {string} functionName - Name of the function being exited
      */
     function logFunctionEnd(functionName) {
+        const line = `${logBase}: end ${functionName}`;
+        bufferLog(line);
         if (isDebug) {
-            console.log(`${logBase}: end ${functionName}`);
+            console.log(line);
         }
     }
 
@@ -327,8 +368,113 @@
         logFunctionEnd('initializeAltZPreference');
     }
 
+    // ============================================================================
+    // USER PREFERENCES (SOURCE CAPTURE)
+    // ============================================================================
+
+    /**
+     * Finds the metadata for a given capture-mode option ID
+     * @param {string} optionId - Identifier stored in preferences
+     * @returns {{id: string, label: string}} Matching option (defaults if not found)
+     */
+    function getCaptureOption(optionId) {
+        return CAPTURE_MODE_OPTIONS.find((option) => option.id === optionId) || CAPTURE_MODE_OPTIONS[0];
+    }
+
+    /**
+     * Loads the persisted capture mode from ViolentMonkey storage (defaults to "none").
+     * @returns {string} Option ID representing the user's preference
+     */
+    function loadCaptureMode() {
+        logFunctionBegin('loadCaptureMode');
+        let storedValue = CAPTURE_MODE_OPTIONS[0].id;
+
+        if (typeof GM_getValue === 'function') {
+            try {
+                storedValue = GM_getValue(CAPTURE_MODE_PREF_KEY, storedValue);
+            } catch (error) {
+                logWarn(`Failed to load capture mode: ${error}`);
+            }
+        }
+
+        if (!CAPTURE_MODE_OPTIONS.some((option) => option.id === storedValue)) {
+            logWarn(`Capture mode "${storedValue}" invalid, reverting to default`);
+            storedValue = CAPTURE_MODE_OPTIONS[0].id;
+        }
+
+        log(`Loaded capture mode: ${storedValue}`);
+        logFunctionEnd('loadCaptureMode');
+        return storedValue;
+    }
+
+    /**
+     * Persists the current capture mode and refreshes its menu command label
+     */
+    function persistCaptureMode() {
+        logFunctionBegin('persistCaptureMode');
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(CAPTURE_MODE_PREF_KEY, captureMode);
+            } catch (error) {
+                logWarn(`Failed to persist capture mode: ${error}`);
+            }
+        }
+        registerCaptureModeMenuCommand();
+        logFunctionEnd('persistCaptureMode');
+    }
+
+    /**
+     * Registers (or re-registers) the ViolentMonkey menu command for cycling capture mode
+     */
+    function registerCaptureModeMenuCommand() {
+        logFunctionBegin('registerCaptureModeMenuCommand');
+        if (typeof GM_registerMenuCommand !== 'function') {
+            log('GM_registerMenuCommand unavailable, skipping capture menu registration');
+            logFunctionEnd('registerCaptureModeMenuCommand');
+            return;
+        }
+
+        if (captureMenuCommandId && typeof GM_unregisterMenuCommand === 'function') {
+            try {
+                GM_unregisterMenuCommand(captureMenuCommandId);
+            } catch (error) {
+                logWarn(`Failed to unregister previous capture menu command: ${error}`);
+            }
+        }
+
+        const optionLabel = getCaptureOption(captureMode).label;
+        const menuLabel = `Capture: ${optionLabel} (click to cycle)`;
+        captureMenuCommandId = GM_registerMenuCommand(menuLabel, cycleCaptureMode);
+        logFunctionEnd('registerCaptureModeMenuCommand');
+    }
+
+    /**
+     * Cycles through capture-mode options and persists the newly selected value
+     */
+    function cycleCaptureMode() {
+        logFunctionBegin('cycleCaptureMode');
+        const currentIndex = CAPTURE_MODE_OPTIONS.findIndex((option) => option.id === captureMode);
+        const nextIndex = (currentIndex + 1) % CAPTURE_MODE_OPTIONS.length;
+        captureMode = CAPTURE_MODE_OPTIONS[nextIndex].id;
+        log(`Capture mode changed to: ${captureMode}`);
+        persistCaptureMode();
+        showNotification(`Capture: ${getCaptureOption(captureMode).label}`);
+        logFunctionEnd('cycleCaptureMode');
+    }
+
+    /**
+     * Initializes capture-mode state and registers its menu command
+     */
+    function initializeCaptureMode() {
+        logFunctionBegin('initializeCaptureMode');
+        captureMode = loadCaptureMode();
+        registerCaptureModeMenuCommand();
+        logFunctionEnd('initializeCaptureMode');
+    }
+
     log('begin script');
     initializeAltZPreference();
+    initializeCaptureMode();
 
     // ============================================================================
     // YOUTUBE TOOLKIT INTEGRATION
@@ -2388,6 +2534,7 @@
                 log('Did copy to clipboard');
                 showNotification(`Copied link to clipboard`);
                 log(`Did show notification for 1 link`);
+                maybeCaptureSources();
             } catch (error) {
                 logError(`Failed to copy to clipboard: ${error}`);
                 showNotification(`Failed to copy link - check console for errors`);
@@ -2414,6 +2561,7 @@
                 // Show notification with count
                 showNotification(`Copied ${buffer.length} links to clipboard`);
                 log(`Did show notification for ${buffer.length} links`);
+                maybeCaptureSources();
             } catch (error) {
                 logError(`Failed to copy to clipboard: ${error}`);
                 showNotification(`Failed to copy ${buffer.length} links - check console for errors`);
@@ -2497,6 +2645,7 @@
             log('Will show notification');
             showNotification('Markdown link copied to clipboard!');
             log('Did show notification');
+            maybeCaptureSources();
         } catch (error) {
             // Type: Error object
             // Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error
@@ -2639,16 +2788,19 @@
             z-index: 999999;
             font-family: sans-serif;
             font-size: 14px;
+            white-space: pre-line;
             animation: mdLinkerFadeIn 0.3s, mdLinkerFadeOut 0.3s 2.7s;
         `;
-        
+
         log('Will append notification to body');
         // appendChild returns the appended node, but we don't use it
         // Type: void
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Node/appendChild
         document.body.appendChild(notification);
+        // Track as the active notification so appendNotificationLine() can add a 2nd line later.
+        activeNotification = notification;
         log('Did append notification to body');
-        
+
         log('Will schedule notification removal in 3000ms');
         // setTimeout schedules function execution after delay
         // Arrow function captures notification variable from closure
@@ -2660,10 +2812,115 @@
             // Type: void
             // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Element/remove
             notification.remove();
+            if (activeNotification === notification) {
+                activeNotification = null;
+            }
             log('Did remove notification');
         }, 3000);
-        
+
         logFunctionEnd('showNotification');
+    }
+
+    /**
+     * Appends a second line to the currently visible notification (used to confirm a capture save).
+     * Falls back to a fresh notification if the previous one has already faded out.
+     * @param {string} text - Line to append
+     */
+    function appendNotificationLine(text) {
+        try {
+            if (activeNotification && activeNotification.isConnected) {
+                activeNotification.textContent = `${activeNotification.textContent}\n${text}`;
+            } else {
+                showNotification(text);
+            }
+        } catch (error) {
+            /* noop — feedback must never throw */
+        }
+    }
+
+    /**
+     * Builds a filesystem-safe slug for non-product pages: "<host>_<path>".
+     * @param {string} url - Page URL
+     * @returns {string} Slug (no path separators), capped in length
+     */
+    function buildCaptureSlug(url) {
+        try {
+            const parsed = new URL(url);
+            const host = parsed.hostname.replace(/[^A-Za-z0-9.-]/g, '_');
+            const path = parsed.pathname.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'index';
+            return `${host}_${path}`.slice(0, 120);
+        } catch (error) {
+            return 'page';
+        }
+    }
+
+    /**
+     * When capture mode is "html & logs", POSTs the live page source + session logs to the local
+     * capture server (common/source_capture) AFTER a clipboard copy. Fails gracefully (just a log
+     * line) when the server is unreachable; appends a 2nd notification line on success.
+     *
+     * Naming: product pages -> sources/products/<asin>.html + logs/<asin>.log (asin via the Amazon
+     * toolkit); other pages -> sources/other/<host-slug>.html + logs/<host-slug>.log.
+     */
+    function maybeCaptureSources() {
+        if (captureMode !== 'html_logs') {
+            return;
+        }
+        logFunctionBegin('maybeCaptureSources');
+        const sourceCapture = (typeof window !== 'undefined' && window.SourceCapture) ? window.SourceCapture : null;
+        if (!sourceCapture || typeof sourceCapture.capture !== 'function') {
+            log('SourceCapture unavailable, skipping capture');
+            logFunctionEnd('maybeCaptureSources');
+            return;
+        }
+
+        const pageUrl = (typeof window !== 'undefined' && window.location && window.location.href) || '';
+
+        let asin = null;
+        const toolkit = getAmazonToolkit();
+        if (toolkit && toolkit.Extractors && typeof toolkit.Extractors.extractProductASIN === 'function') {
+            try {
+                asin = toolkit.Extractors.extractProductASIN(document, pageUrl);
+            } catch (error) {
+                /* noop — ASIN is best-effort */
+            }
+        }
+
+        let pageType;
+        let baseName;
+        if (asin) {
+            pageType = 'products';
+            baseName = asin;
+        } else {
+            pageType = 'other';
+            baseName = buildCaptureSlug(pageUrl);
+        }
+
+        const htmlPath = `sources/${pageType}/${baseName}.html`;
+        const logsPath = `logs/${baseName}.log`;
+        const html = `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+        const logs = sourceCapture.logBuffer ? sourceCapture.logBuffer.getText() : '';
+
+        log(`Will capture page source + logs -> ${htmlPath}, ${logsPath}`);
+        sourceCapture.capture({
+            userscript: 'markdown_linker',
+            files: [
+                { path: htmlPath, content: html },
+                { path: logsPath, content: logs }
+            ],
+            onResult: (result) => {
+                if (result && result.ok) {
+                    log(`Capture saved: ${htmlPath} + ${logsPath}`);
+                    appendNotificationLine('Saved page source + logs to disk');
+                } else {
+                    const firstError = result && result.results && result.results[0] && result.results[0].error
+                        ? result.results[0].error
+                        : 'unknown';
+                    log(`Capture not saved (server unavailable?): ${firstError}`);
+                }
+            }
+        });
+        logFunctionEnd('maybeCaptureSources');
     }
 
     // Add CSS keyframe animations for notification fade in/out and click feedback
@@ -3311,6 +3568,7 @@
                             GM_setClipboard(allLinksMarkdown, 'text/plain');
                             log('Did copy all links to clipboard');
                             showNotification('All page links copied to clipboard!');
+                            maybeCaptureSources();
                         } catch (error) {
                             logError(`Failed to copy all links: ${error}`);
                             alert('Failed to copy to clipboard. Check console for details.');

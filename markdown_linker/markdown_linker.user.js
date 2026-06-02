@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_unregisterMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -3611,6 +3613,137 @@ ${textLink}`;
     }
   });
 
+  // ../../common/source_capture/source_capture.js
+  var require_source_capture = __commonJS({
+    "../../common/source_capture/source_capture.js"(exports, module) {
+      "use strict";
+      var DEFAULT_HOST = "127.0.0.1";
+      var DEFAULT_PORT = 8787;
+      var DEFAULT_TOKEN = "source-capture-dev";
+      var DEFAULT_TIMEOUT_MS = 8e3;
+      function createLogBuffer(maxLines = 5e3) {
+        const lines = [];
+        return {
+          push(line) {
+            lines.push(typeof line === "string" ? line : String(line));
+            if (lines.length > maxLines) {
+              lines.splice(0, lines.length - maxLines);
+            }
+          },
+          getText() {
+            return lines.join("\n");
+          },
+          clear() {
+            lines.length = 0;
+          },
+          size() {
+            return lines.length;
+          }
+        };
+      }
+      function resolveGmXhr() {
+        if (typeof GM_xmlhttpRequest === "function") {
+          return GM_xmlhttpRequest;
+        }
+        if (typeof GM !== "undefined" && GM && typeof GM.xmlHttpRequest === "function") {
+          return GM.xmlHttpRequest.bind(GM);
+        }
+        return null;
+      }
+      function postFile(opts) {
+        return new Promise((resolve) => {
+          const xhr = resolveGmXhr();
+          if (!xhr) {
+            resolve({ ok: false, path: opts.path, error: "GM_xmlhttpRequest unavailable (missing @grant?)" });
+            return;
+          }
+          const url = `http://${opts.host}:${opts.port}/save`;
+          try {
+            xhr({
+              method: "POST",
+              url,
+              headers: {
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Capture-Token": opts.token,
+                "X-Capture-Userscript": opts.userscript,
+                "X-Capture-Path": opts.path
+              },
+              data: opts.content,
+              timeout: DEFAULT_TIMEOUT_MS,
+              onload: (response) => {
+                const status = response && typeof response.status === "number" ? response.status : 0;
+                resolve({
+                  ok: status >= 200 && status < 300,
+                  path: opts.path,
+                  status,
+                  response: response ? response.responseText : ""
+                });
+              },
+              onerror: () => resolve({ ok: false, path: opts.path, error: "network error (server not running?)" }),
+              ontimeout: () => resolve({ ok: false, path: opts.path, error: "timeout" })
+            });
+          } catch (error) {
+            resolve({ ok: false, path: opts.path, error: String(error) });
+          }
+        });
+      }
+      function capture(options) {
+        const opts = options || {};
+        const host = opts.host || DEFAULT_HOST;
+        const port = opts.port || DEFAULT_PORT;
+        const token = opts.token || DEFAULT_TOKEN;
+        const userscript = opts.userscript;
+        const files = Array.isArray(opts.files) ? opts.files.filter((file) => file && file.path) : [];
+        if (!userscript || files.length === 0) {
+          const result = { ok: false, results: [], error: "capture requires { userscript, files: [{path, content}] }" };
+          if (typeof opts.onResult === "function") {
+            try {
+              opts.onResult(result);
+            } catch (error) {
+            }
+          }
+          return Promise.resolve(result);
+        }
+        const requests = files.map((file) => postFile({
+          host,
+          port,
+          token,
+          userscript,
+          path: file.path,
+          content: file.content == null ? "" : String(file.content)
+        }));
+        return Promise.all(requests).then((results) => {
+          const ok = results.length > 0 && results.every((entry) => entry.ok);
+          const result = { ok, results };
+          if (typeof opts.onResult === "function") {
+            try {
+              opts.onResult(result);
+            } catch (error) {
+            }
+          }
+          return result;
+        });
+      }
+      var SourceCapture = {
+        version: "0.1.0",
+        DEFAULT_HOST,
+        DEFAULT_PORT,
+        DEFAULT_TOKEN,
+        capture,
+        postFile,
+        createLogBuffer,
+        // Shared buffer instance for the common "pipe my logs through this" case.
+        logBuffer: createLogBuffer()
+      };
+      if (typeof module !== "undefined" && module.exports) {
+        module.exports = SourceCapture;
+      }
+      if (typeof window !== "undefined") {
+        window.SourceCapture = SourceCapture;
+      }
+    }
+  });
+
   // src/userscript.entry.js
   var import_validation_helpers = __toESM(require_validation_helpers(), 1);
   var import_shared_extractor = __toESM(require_shared_extractor(), 1);
@@ -3623,6 +3756,7 @@ ${textLink}`;
   var import_markdown_generator = __toESM(require_markdown_generator(), 1);
   var import_lib = __toESM(require_amazon_toolkit(), 1);
   var import_lib_youtube = __toESM(require_youtube_toolkit(), 1);
+  var import_source_capture = __toESM(require_source_capture(), 1);
 
   // src/markdown_linker.source.js
   console.log(`markdown_linker: 01`);
@@ -3631,6 +3765,7 @@ ${textLink}`;
     console.log(`markdown_linker: 11`);
     const isDebug = true;
     let logBase = "markdown_linker";
+    let activeNotification = null;
     let currentMenu = null;
     let targetElement = null;
     let targetUrl = null;
@@ -3671,25 +3806,50 @@ ${textLink}`;
     ];
     let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
     let altZMenuCommandId = null;
+    const CAPTURE_MODE_PREF_KEY = "markdown_linker.capture_mode";
+    const CAPTURE_MODE_OPTIONS = [
+      { id: "none", label: "none" },
+      { id: "html_logs", label: "html & logs" }
+    ];
+    let captureMode = CAPTURE_MODE_OPTIONS[0].id;
+    let captureMenuCommandId = null;
+    function bufferLog(line) {
+      try {
+        if (typeof window !== "undefined" && window.SourceCapture && window.SourceCapture.logBuffer) {
+          window.SourceCapture.logBuffer.push(line);
+        }
+      } catch (error) {
+      }
+    }
     function log(message) {
+      const line = `${logBase}: ${message}`;
+      bufferLog(line);
       if (isDebug) {
-        console.log(`${logBase}: ${message}`);
+        console.log(line);
       }
     }
     function logWarn(message) {
-      console.warn(`${logBase}: ${message}`);
+      const line = `${logBase}: ${message}`;
+      bufferLog(`WARN ${line}`);
+      console.warn(line);
     }
     function logError(message) {
-      console.error(`${logBase}: ${message}`);
+      const line = `${logBase}: ${message}`;
+      bufferLog(`ERROR ${line}`);
+      console.error(line);
     }
     function logFunctionBegin(functionName) {
+      const line = `${logBase}: begin ${functionName}`;
+      bufferLog(line);
       if (isDebug) {
-        console.log(`${logBase}: begin ${functionName}`);
+        console.log(line);
       }
     }
     function logFunctionEnd(functionName) {
+      const line = `${logBase}: end ${functionName}`;
+      bufferLog(line);
       if (isDebug) {
-        console.log(`${logBase}: end ${functionName}`);
+        console.log(line);
       }
     }
     function unwrap(obj, prop) {
@@ -3764,8 +3924,77 @@ ${textLink}`;
       registerAltZTitleMenuCommand();
       logFunctionEnd("initializeAltZPreference");
     }
+    function getCaptureOption(optionId) {
+      return CAPTURE_MODE_OPTIONS.find((option) => option.id === optionId) || CAPTURE_MODE_OPTIONS[0];
+    }
+    function loadCaptureMode() {
+      logFunctionBegin("loadCaptureMode");
+      let storedValue = CAPTURE_MODE_OPTIONS[0].id;
+      if (typeof GM_getValue === "function") {
+        try {
+          storedValue = GM_getValue(CAPTURE_MODE_PREF_KEY, storedValue);
+        } catch (error) {
+          logWarn(`Failed to load capture mode: ${error}`);
+        }
+      }
+      if (!CAPTURE_MODE_OPTIONS.some((option) => option.id === storedValue)) {
+        logWarn(`Capture mode "${storedValue}" invalid, reverting to default`);
+        storedValue = CAPTURE_MODE_OPTIONS[0].id;
+      }
+      log(`Loaded capture mode: ${storedValue}`);
+      logFunctionEnd("loadCaptureMode");
+      return storedValue;
+    }
+    function persistCaptureMode() {
+      logFunctionBegin("persistCaptureMode");
+      if (typeof GM_setValue === "function") {
+        try {
+          GM_setValue(CAPTURE_MODE_PREF_KEY, captureMode);
+        } catch (error) {
+          logWarn(`Failed to persist capture mode: ${error}`);
+        }
+      }
+      registerCaptureModeMenuCommand();
+      logFunctionEnd("persistCaptureMode");
+    }
+    function registerCaptureModeMenuCommand() {
+      logFunctionBegin("registerCaptureModeMenuCommand");
+      if (typeof GM_registerMenuCommand !== "function") {
+        log("GM_registerMenuCommand unavailable, skipping capture menu registration");
+        logFunctionEnd("registerCaptureModeMenuCommand");
+        return;
+      }
+      if (captureMenuCommandId && typeof GM_unregisterMenuCommand === "function") {
+        try {
+          GM_unregisterMenuCommand(captureMenuCommandId);
+        } catch (error) {
+          logWarn(`Failed to unregister previous capture menu command: ${error}`);
+        }
+      }
+      const optionLabel = getCaptureOption(captureMode).label;
+      const menuLabel = `Capture: ${optionLabel} (click to cycle)`;
+      captureMenuCommandId = GM_registerMenuCommand(menuLabel, cycleCaptureMode);
+      logFunctionEnd("registerCaptureModeMenuCommand");
+    }
+    function cycleCaptureMode() {
+      logFunctionBegin("cycleCaptureMode");
+      const currentIndex = CAPTURE_MODE_OPTIONS.findIndex((option) => option.id === captureMode);
+      const nextIndex = (currentIndex + 1) % CAPTURE_MODE_OPTIONS.length;
+      captureMode = CAPTURE_MODE_OPTIONS[nextIndex].id;
+      log(`Capture mode changed to: ${captureMode}`);
+      persistCaptureMode();
+      showNotification(`Capture: ${getCaptureOption(captureMode).label}`);
+      logFunctionEnd("cycleCaptureMode");
+    }
+    function initializeCaptureMode() {
+      logFunctionBegin("initializeCaptureMode");
+      captureMode = loadCaptureMode();
+      registerCaptureModeMenuCommand();
+      logFunctionEnd("initializeCaptureMode");
+    }
     log("begin script");
     initializeAltZPreference();
+    initializeCaptureMode();
     let youtubeContextCacheKey = null;
     let youtubeContextCacheValue = null;
     function getYouTubeToolkit() {
@@ -5236,6 +5465,7 @@ Open debugger to inspect?`;
           log("Did copy to clipboard");
           showNotification(`Copied link to clipboard`);
           log(`Did show notification for 1 link`);
+          maybeCaptureSources();
         } catch (error) {
           logError(`Failed to copy to clipboard: ${error}`);
           showNotification(`Failed to copy link - check console for errors`);
@@ -5255,6 +5485,7 @@ Open debugger to inspect?`;
           log("Did copy to clipboard");
           showNotification(`Copied ${buffer.length} links to clipboard`);
           log(`Did show notification for ${buffer.length} links`);
+          maybeCaptureSources();
         } catch (error) {
           logError(`Failed to copy to clipboard: ${error}`);
           showNotification(`Failed to copy ${buffer.length} links - check console for errors`);
@@ -5284,6 +5515,7 @@ Open debugger to inspect?`;
         log("Will show notification");
         showNotification("Markdown link copied to clipboard!");
         log("Did show notification");
+        maybeCaptureSources();
       } catch (error) {
         log(`ERROR: Failed to copy to clipboard: ${error}`);
         console.error(`${logBase}: Failed to copy to clipboard:`, error);
@@ -5361,18 +5593,97 @@ Open debugger to inspect?`;
             z-index: 999999;
             font-family: sans-serif;
             font-size: 14px;
+            white-space: pre-line;
             animation: mdLinkerFadeIn 0.3s, mdLinkerFadeOut 0.3s 2.7s;
         `;
       log("Will append notification to body");
       document.body.appendChild(notification);
+      activeNotification = notification;
       log("Did append notification to body");
       log("Will schedule notification removal in 3000ms");
       setTimeout(() => {
         log("Will remove notification");
         notification.remove();
+        if (activeNotification === notification) {
+          activeNotification = null;
+        }
         log("Did remove notification");
       }, 3e3);
       logFunctionEnd("showNotification");
+    }
+    function appendNotificationLine(text) {
+      try {
+        if (activeNotification && activeNotification.isConnected) {
+          activeNotification.textContent = `${activeNotification.textContent}
+${text}`;
+        } else {
+          showNotification(text);
+        }
+      } catch (error) {
+      }
+    }
+    function buildCaptureSlug(url) {
+      try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.replace(/[^A-Za-z0-9.-]/g, "_");
+        const path = parsed.pathname.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "index";
+        return `${host}_${path}`.slice(0, 120);
+      } catch (error) {
+        return "page";
+      }
+    }
+    function maybeCaptureSources() {
+      if (captureMode !== "html_logs") {
+        return;
+      }
+      logFunctionBegin("maybeCaptureSources");
+      const sourceCapture = typeof window !== "undefined" && window.SourceCapture ? window.SourceCapture : null;
+      if (!sourceCapture || typeof sourceCapture.capture !== "function") {
+        log("SourceCapture unavailable, skipping capture");
+        logFunctionEnd("maybeCaptureSources");
+        return;
+      }
+      const pageUrl = typeof window !== "undefined" && window.location && window.location.href || "";
+      let asin = null;
+      const toolkit = getAmazonToolkit();
+      if (toolkit && toolkit.Extractors && typeof toolkit.Extractors.extractProductASIN === "function") {
+        try {
+          asin = toolkit.Extractors.extractProductASIN(document, pageUrl);
+        } catch (error) {
+        }
+      }
+      let pageType;
+      let baseName;
+      if (asin) {
+        pageType = "products";
+        baseName = asin;
+      } else {
+        pageType = "other";
+        baseName = buildCaptureSlug(pageUrl);
+      }
+      const htmlPath = `sources/${pageType}/${baseName}.html`;
+      const logsPath = `logs/${baseName}.log`;
+      const html = `<!DOCTYPE html>
+${document.documentElement.outerHTML}`;
+      const logs = sourceCapture.logBuffer ? sourceCapture.logBuffer.getText() : "";
+      log(`Will capture page source + logs -> ${htmlPath}, ${logsPath}`);
+      sourceCapture.capture({
+        userscript: "markdown_linker",
+        files: [
+          { path: htmlPath, content: html },
+          { path: logsPath, content: logs }
+        ],
+        onResult: (result) => {
+          if (result && result.ok) {
+            log(`Capture saved: ${htmlPath} + ${logsPath}`);
+            appendNotificationLine("Saved page source + logs to disk");
+          } else {
+            const firstError = result && result.results && result.results[0] && result.results[0].error ? result.results[0].error : "unknown";
+            log(`Capture not saved (server unavailable?): ${firstError}`);
+          }
+        }
+      });
+      logFunctionEnd("maybeCaptureSources");
     }
     log("Will add CSS keyframe animations");
     const style = document.createElement("style");
@@ -5815,6 +6126,7 @@ Open debugger to inspect?`;
                 GM_setClipboard(allLinksMarkdown, "text/plain");
                 log("Did copy all links to clipboard");
                 showNotification("All page links copied to clipboard!");
+                maybeCaptureSources();
               } catch (error) {
                 logError(`Failed to copy all links: ${error}`);
                 alert("Failed to copy to clipboard. Check console for details.");
