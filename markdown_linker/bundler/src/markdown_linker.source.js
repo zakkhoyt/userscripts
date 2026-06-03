@@ -166,7 +166,7 @@
     let altZMenuCommandId = null;
 
     // Source-capture preference: when "html & logs", every clipboard copy also POSTs the page
-    // source + session logs to the local capture server (common/source_capture). Default: none.
+    // source + session logs to the local capture server (scripts/source_capture). Default: none.
     const CAPTURE_MODE_PREF_KEY = 'markdown_linker.capture_mode';
     const CAPTURE_MODE_OPTIONS = [
         { id: 'none', label: 'none' },
@@ -2887,7 +2887,7 @@
 
     /**
      * When capture mode is "html & logs", POSTs the live page source + session logs to the local
-     * capture server (common/source_capture) AFTER a clipboard copy. Fails gracefully (just a log
+     * capture server (scripts/source_capture) AFTER a clipboard copy. Fails gracefully (just a log
      * line) when the server is unreachable; appends a 2nd notification line on success.
      *
      * The captured HTML is prefixed with an HTML comment recording the raw clicked URL (unstripped),

@@ -3,6 +3,10 @@
 **/_gitignored/
 **/.gitignored/
 
+# Python bytecode (e.g. scripts/source_capture receiver imported by tests)
+**/__pycache__/
+*.pyc
+
 # ---- Z2k project specific
 
 **/reference/
