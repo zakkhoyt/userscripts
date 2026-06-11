@@ -4006,6 +4006,7 @@ ${textLink}`;
     initializeAltZPreference();
     initializeCaptureMode();
     triggers = loadTriggers();
+    registerSettingsMenuCommand();
     let youtubeContextCacheKey = null;
     let youtubeContextCacheValue = null;
     function getYouTubeToolkit() {
@@ -6352,6 +6353,266 @@ ${document.documentElement.outerHTML}`;
         }
       }
       return cloneTriggers(DEFAULT_TRIGGERS);
+    }
+    function saveTriggers() {
+      if (typeof GM_setValue === "function") {
+        try {
+          GM_setValue(TRIGGERS_PREF_KEY, JSON.stringify(triggers));
+        } catch (error) {
+          logWarn(`Failed to save triggers: ${error}`);
+        }
+      }
+    }
+    const ACTION_LABELS = {
+      menu: "Open menu",
+      inferQuiet: "Quiet copy (no menu)",
+      inferBuffer: "Buffer links (hold + click)"
+    };
+    let settingsPanelEl = null;
+    let settingsBodyEl = null;
+    let recordingAction = null;
+    let recordOverlayEl = null;
+    let recordModifiers = null;
+    let recordKeys = null;
+    function formatBinding(binding) {
+      const parts = [];
+      const m = binding.modifiers || {};
+      if (m.meta) {
+        parts.push("\u2318");
+      }
+      if (m.ctrl) {
+        parts.push("\u2303");
+      }
+      if (m.alt) {
+        parts.push("\u2325");
+      }
+      if (m.shift) {
+        parts.push("\u21E7");
+      }
+      (binding.keys || []).forEach((key) => parts.push(key.toUpperCase()));
+      let label = parts.join(" + ") || "(unset)";
+      if (binding.requiresClick) {
+        label = `${label} + click`;
+      }
+      return label;
+    }
+    function formatActionBindings(actionName) {
+      const list = triggers[actionName] || [];
+      return list.length ? list.map(formatBinding).join("  or  ") : "(none)";
+    }
+    function styleSettingsButton(button) {
+      button.style.cssText = "margin-left:8px;padding:3px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#f8f9fa;font-size:12px;cursor:pointer;";
+    }
+    function updateRecordOverlay() {
+      if (!recordOverlayEl) {
+        return;
+      }
+      const preview = recordOverlayEl.querySelector("#markdown-linker-record-preview");
+      if (preview) {
+        preview.textContent = `${formatBinding({ modifiers: recordModifiers, keys: Array.from(recordKeys) })} \u2026`;
+      }
+    }
+    function hideRecordOverlay() {
+      if (recordOverlayEl) {
+        recordOverlayEl.remove();
+        recordOverlayEl = null;
+      }
+    }
+    function showRecordOverlay(actionName) {
+      hideRecordOverlay();
+      const overlay = document.createElement("div");
+      overlay.id = "markdown-linker-record-overlay";
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1000001;display:flex;align-items:center;justify-content:center;color:#fff;font-family:sans-serif;text-align:center;";
+      const box = document.createElement("div");
+      box.style.cssText = "max-width:80vw;padding:0 20px;";
+      const heading = document.createElement("div");
+      heading.textContent = `Recording: ${ACTION_LABELS[actionName] || actionName}`;
+      heading.style.cssText = "font-size:18px;font-weight:600;margin-bottom:8px;";
+      const instr = document.createElement("div");
+      instr.textContent = "Press your keys, then click anywhere \u2014 or just release the keys for a keyboard-only trigger. Esc to cancel.";
+      instr.style.cssText = "font-size:13px;opacity:0.8;margin-bottom:12px;";
+      const preview = document.createElement("div");
+      preview.id = "markdown-linker-record-preview";
+      preview.textContent = "\u2026";
+      preview.style.cssText = "font-size:22px;font-weight:700;letter-spacing:0.04em;";
+      box.appendChild(heading);
+      box.appendChild(instr);
+      box.appendChild(preview);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      recordOverlayEl = overlay;
+    }
+    function accumulateRecordModifiers(event) {
+      const state = bindingState(event);
+      recordModifiers.meta = recordModifiers.meta || state.meta;
+      recordModifiers.ctrl = recordModifiers.ctrl || state.ctrl;
+      recordModifiers.alt = recordModifiers.alt || state.alt;
+      recordModifiers.shift = recordModifiers.shift || state.shift;
+    }
+    function recordKeydownHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        stopRecording();
+        return;
+      }
+      accumulateRecordModifiers(event);
+      if (event.key && event.key.length === 1) {
+        recordKeys.add(event.key.toLowerCase());
+      }
+      updateRecordOverlay();
+    }
+    function recordKeyupHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (recordKeys && recordKeys.size > 0) {
+        commitRecording(false);
+      }
+    }
+    function recordClickHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      accumulateRecordModifiers(event);
+      commitRecording(true);
+    }
+    function commitRecording(requiresClick) {
+      const action = recordingAction;
+      if (!action) {
+        return;
+      }
+      const binding = {
+        modifiers: {
+          meta: !!recordModifiers.meta,
+          ctrl: !!recordModifiers.ctrl,
+          alt: !!recordModifiers.alt,
+          shift: !!recordModifiers.shift
+        },
+        keys: Array.from(recordKeys),
+        requiresClick: !!requiresClick
+      };
+      if (!bindingHasInput(binding)) {
+        stopRecording();
+        return;
+      }
+      triggers[action] = [binding];
+      saveTriggers();
+      log(`Recorded ${action} trigger: ${formatBinding(binding)}`);
+      stopRecording();
+    }
+    function startRecording(actionName) {
+      recordingAction = actionName;
+      recordModifiers = { meta: false, ctrl: false, alt: false, shift: false };
+      recordKeys = /* @__PURE__ */ new Set();
+      window.addEventListener("keydown", recordKeydownHandler, true);
+      window.addEventListener("keyup", recordKeyupHandler, true);
+      window.addEventListener("click", recordClickHandler, true);
+      showRecordOverlay(actionName);
+    }
+    function stopRecording() {
+      window.removeEventListener("keydown", recordKeydownHandler, true);
+      window.removeEventListener("keyup", recordKeyupHandler, true);
+      window.removeEventListener("click", recordClickHandler, true);
+      recordingAction = null;
+      recordModifiers = null;
+      recordKeys = null;
+      hideRecordOverlay();
+      refreshSettingsPanel();
+    }
+    function renderSettingsBody(body) {
+      body.textContent = "";
+      Object.keys(ACTION_LABELS).forEach((action) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+        const left = document.createElement("div");
+        const name = document.createElement("div");
+        name.textContent = ACTION_LABELS[action];
+        name.style.cssText = "font-size:13px;color:#f8f9fa;";
+        const bindingLabel = document.createElement("div");
+        bindingLabel.textContent = formatActionBindings(action);
+        bindingLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+        left.appendChild(name);
+        left.appendChild(bindingLabel);
+        const right = document.createElement("div");
+        const recordButton = document.createElement("button");
+        recordButton.textContent = "Record";
+        styleSettingsButton(recordButton);
+        recordButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          startRecording(action);
+        });
+        const resetButton = document.createElement("button");
+        resetButton.textContent = "Reset";
+        styleSettingsButton(resetButton);
+        resetButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          triggers[action] = cloneTriggers(DEFAULT_TRIGGERS)[action];
+          saveTriggers();
+          refreshSettingsPanel();
+        });
+        right.appendChild(recordButton);
+        right.appendChild(resetButton);
+        row.appendChild(left);
+        row.appendChild(right);
+        body.appendChild(row);
+      });
+    }
+    function refreshSettingsPanel() {
+      if (settingsBodyEl) {
+        renderSettingsBody(settingsBodyEl);
+      }
+    }
+    function closeTriggerSettings() {
+      if (settingsPanelEl) {
+        settingsPanelEl.remove();
+        settingsPanelEl = null;
+        settingsBodyEl = null;
+      }
+    }
+    function openTriggerSettings() {
+      closeTriggerSettings();
+      const panel = document.createElement("div");
+      panel.id = "markdown-linker-settings";
+      panel.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:#1f1f1f;color:#f8f9fa;border:1px solid rgba(255,255,255,0.25);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.6);z-index:1000000;font-family:sans-serif;padding:16px;";
+      const title = document.createElement("div");
+      title.textContent = "Markdown Linker \u2014 Triggers";
+      title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:4px;";
+      const hint = document.createElement("div");
+      hint.textContent = "Click Record, then press your keys and/or click. Esc cancels.";
+      hint.style.cssText = "font-size:11px;color:rgba(248,249,250,0.6);margin-bottom:10px;";
+      const body = document.createElement("div");
+      const footer = document.createElement("div");
+      footer.style.cssText = "display:flex;justify-content:flex-end;margin-top:12px;";
+      const resetAll = document.createElement("button");
+      resetAll.textContent = "Reset all";
+      styleSettingsButton(resetAll);
+      resetAll.addEventListener("click", (event) => {
+        event.stopPropagation();
+        triggers = cloneTriggers(DEFAULT_TRIGGERS);
+        saveTriggers();
+        refreshSettingsPanel();
+      });
+      const closeButton = document.createElement("button");
+      closeButton.textContent = "Close";
+      styleSettingsButton(closeButton);
+      closeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeTriggerSettings();
+      });
+      footer.appendChild(resetAll);
+      footer.appendChild(closeButton);
+      panel.appendChild(title);
+      panel.appendChild(hint);
+      panel.appendChild(body);
+      panel.appendChild(footer);
+      document.body.appendChild(panel);
+      settingsPanelEl = panel;
+      settingsBodyEl = body;
+      renderSettingsBody(body);
+    }
+    function registerSettingsMenuCommand() {
+      if (typeof GM_registerMenuCommand === "function") {
+        GM_registerMenuCommand("Markdown Linker: triggers\u2026", openTriggerSettings);
+      }
     }
     function handleClick(event) {
       logFunctionBegin("handleClick");
