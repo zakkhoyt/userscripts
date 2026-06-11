@@ -2,7 +2,7 @@
 // @name         Markdown Linker
 // @namespace    https://github.com/zakkhoyt/greasemonkey/markdown_linker
 // @version      1.0.0
-// @description  Convert URLs to markdown links with Alt+Click, Alt+Right-Click, Alt+M, or M key
+// @description  Convert URLs to markdown links — configurable key triggers (defaults: V=menu, B=quiet copy, hold Z+click=buffer)
 // @downloadURL  https://raw.githubusercontent.com/zakkhoyt/userscripts/zakk/markdown_linker_domains/markdown_linker/markdown_linker.user.js
 // @updateURL    https://raw.githubusercontent.com/zakkhoyt/userscripts/zakk/markdown_linker_domains/markdown_linker/markdown_linker.user.js
 // @author       Zakk Hoyt
@@ -174,6 +174,19 @@
     ];
     let captureMode = CAPTURE_MODE_OPTIONS[0].id;
     let captureMenuCommandId = null;
+
+    // ---- Configurable triggers (replaces the hard-coded Alt modifier) ----
+    // A binding = { modifiers:{meta,ctrl,alt,shift}, keys:[lowercase chars], requiresClick }.
+    // Modifiers are read from the event; regular keys from the `pressedKeys` set. `fn` is NOT
+    // supported (browsers don't expose it). Defaults avoid Alt (unreliable on macOS) and use keys
+    // that are unbound in the YouTube player and in Firefox: V (menu), B (quiet copy), Z (buffer).
+    const TRIGGERS_PREF_KEY = 'markdown_linker.triggers';
+    const DEFAULT_TRIGGERS = {
+        menu: [{ modifiers: {}, keys: ['v'], requiresClick: false }],         // hover + V -> open menu
+        inferQuiet: [{ modifiers: {}, keys: ['b'], requiresClick: false }],   // hover + B -> copy one link
+        inferBuffer: [{ modifiers: {}, keys: ['z'], requiresClick: true }]    // hold Z + click… -> buffer list
+    };
+    let triggers = cloneTriggers(DEFAULT_TRIGGERS);
     // ============================================================================
 
     /**
@@ -476,6 +489,7 @@
     log('begin script');
     initializeAltZPreference();
     initializeCaptureMode();
+    triggers = loadTriggers();
 
     // ============================================================================
     // YOUTUBE TOOLKIT INTEGRATION
@@ -3787,21 +3801,99 @@
     // ============================================================================
 
     /**
-     * Determines if event should trigger the markdown menu
-     * Currently checks for Alt/Option key modifier
-     * @param {Event} event - The DOM event (click, contextmenu, keydown)
-     * @returns {boolean} True if Alt key is pressed
-     * Reference: https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/altKey
+     * Deep-clones a triggers config (so defaults are never mutated).
      */
-    function shouldTrigger(event) {
-        logFunctionBegin('shouldTrigger');
-        log(`Checking if Alt key is pressed: ${event.altKey}`);
-        
-        const result = event.altKey;
-        log(`Should trigger: ${result}`);
-        
-        logFunctionEnd('shouldTrigger');
-        return result;
+    function cloneTriggers(source) {
+        const out = {};
+        Object.keys(source || {}).forEach((action) => {
+            out[action] = (source[action] || []).map((binding) => ({
+                modifiers: Object.assign({}, binding.modifiers),
+                keys: (binding.keys || []).slice(),
+                requiresClick: !!binding.requiresClick
+            }));
+        });
+        return out;
+    }
+
+    /**
+     * Snapshots the modifier state from a DOM event.
+     */
+    function bindingState(event) {
+        return {
+            meta: !!event.metaKey,
+            ctrl: !!event.ctrlKey,
+            alt: !!event.altKey,
+            shift: !!event.shiftKey
+        };
+    }
+
+    /**
+     * True if a binding requires at least one key or modifier (never matches "no input").
+     */
+    function bindingHasInput(binding) {
+        const m = binding.modifiers || {};
+        return (binding.keys && binding.keys.length > 0) || !!(m.meta || m.ctrl || m.alt || m.shift);
+    }
+
+    /**
+     * Whether the given modifier state + currently-pressed keys satisfy a binding (exact modifier
+     * match; all of the binding's regular keys must be held).
+     */
+    function matchesBinding(binding, state) {
+        if (!binding || !bindingHasInput(binding)) {
+            return false;
+        }
+        const m = binding.modifiers || {};
+        if (!!m.meta !== state.meta || !!m.ctrl !== state.ctrl || !!m.alt !== state.alt || !!m.shift !== state.shift) {
+            return false;
+        }
+        const keys = binding.keys || [];
+        for (let index = 0; index < keys.length; index += 1) {
+            if (!pressedKeys.has(keys[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Does any click-type binding for `actionName` match the current state? (used on click events)
+     */
+    function actionMatchesClick(actionName, state) {
+        const list = triggers[actionName] || [];
+        return list.some((binding) => binding && binding.requiresClick && matchesBinding(binding, state));
+    }
+
+    /**
+     * Did the just-pressed key complete a keyboard-type binding for `actionName`? (used on keydown).
+     * Requiring `justPressedKey` to be part of the binding avoids re-firing on unrelated keydowns.
+     */
+    function keyboardActionTriggered(actionName, state, justPressedKey) {
+        const list = triggers[actionName] || [];
+        return list.some((binding) =>
+            binding && !binding.requiresClick &&
+            (binding.keys || []).indexOf(justPressedKey) !== -1 &&
+            matchesBinding(binding, state));
+    }
+
+    /**
+     * Loads trigger bindings from storage, falling back to defaults. (Settings UI writes them.)
+     */
+    function loadTriggers() {
+        if (typeof GM_getValue === 'function') {
+            try {
+                const stored = GM_getValue(TRIGGERS_PREF_KEY, null);
+                if (stored) {
+                    const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
+                    if (parsed && typeof parsed === 'object') {
+                        return cloneTriggers(parsed);
+                    }
+                }
+            } catch (error) {
+                logWarn(`Failed to load triggers, using defaults: ${error}`);
+            }
+        }
+        return cloneTriggers(DEFAULT_TRIGGERS);
     }
 
     /**
@@ -3814,13 +3906,14 @@
         logFunctionBegin('handleClick');
         log('Click event received');
         
-        // Debug: Log Alt+Z status
-        const isAltPressed = event.altKey;
-        const isZPressed = isZKeyDown;
-        log(`Click: altKey=${isAltPressed}, z down=${isZPressed}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
+        // Evaluate configurable click triggers (menu vs. buffer/auto-infer).
+        const clickState = bindingState(event);
+        const menuClick = actionMatchesClick('menu', clickState);
+        const bufferClick = actionMatchesClick('inferBuffer', clickState);
+        log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
 
-        if (!shouldTrigger(event)) {
-            log('Should not trigger (Alt key not pressed), returning');
+        if (!menuClick && !bufferClick) {
+            log('No click trigger matched, returning');
             logFunctionEnd('handleClick');
             return;
         }
@@ -3832,12 +3925,9 @@
         event.stopPropagation();
         log('Did prevent default and stop propagation');
 
-        // Check if Alt+Z are both pressed (auto-infer mode)
-        // Use event.altKey directly for Alt
-        // Use isZKeyDown for Z (simple boolean flag)
-        log('Will check if Alt+Z keys are pressed (auto-infer mode)');
-        const isAutoInferMode = event.altKey && isZKeyDown;
-        log(`Is auto-infer mode (Alt+Z+Click): ${isAutoInferMode}`);
+        // Buffer (auto-infer) mode when the buffer trigger matched; otherwise open the menu.
+        const isAutoInferMode = bufferClick;
+        log(`Is auto-infer (buffer) mode: ${isAutoInferMode}`);
         
         // If we just entered auto-infer mode, mark that the buffer is now active
         if (isAutoInferMode && !isAltZBufferActive) {
@@ -3942,8 +4032,9 @@
         logFunctionBegin('handleContextMenu');
         log('Context menu (right-click) event received');
         
-        if (!shouldTrigger(event)) {
-            log('Should not trigger (Alt key not pressed), returning');
+        const contextState = bindingState(event);
+        if (!actionMatchesClick('menu', contextState)) {
+            log('No menu trigger matched on right-click, returning');
             logFunctionEnd('handleContextMenu');
             return;
         }
@@ -4034,8 +4125,12 @@
         // Check if target has contenteditable attribute
         // contenteditable="true" allows editing of non-form elements
         // Reference: https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/contenteditable
-        const isContentEditable = target && target.contentEditable === 'true' || target ? target.closest('[contenteditable="true"]') : null;
-        log(`Is contenteditable: ${!!isContentEditable}`);
+        // Guard `.closest` — the keydown target may be a non-element (e.g. document) with no closest().
+        const isContentEditable = !!(target && (
+            target.contentEditable === 'true' ||
+            (typeof target.closest === 'function' && target.closest('[contenteditable="true"]'))
+        ));
+        log(`Is contenteditable: ${isContentEditable}`);
         
         const result = isInputField || isTextArea || !!isContentEditable;
         log(`Should skip keyboard trigger: ${result}`);
@@ -4053,18 +4148,19 @@
     function handleKeydown(event) {
         // Check if M key pressed (case-insensitive)
         // Alt+M or M alone (without Ctrl/Shift/Meta)
-        const isM = event.key === 'm' || event.key === 'M';
-        const isAltM = isM && event.altKey;
-        const isMalone = isM && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey;
+        if (event.repeat) { return; } // ignore auto-repeat; fire once per press
+        const justPressedKey = (event.key && event.key.length === 1) ? event.key.toLowerCase() : null;
+        const keyState = bindingState(event);
+        const isMenuKey = !!justPressedKey && keyboardActionTriggered('menu', keyState, justPressedKey);
+        const isInferKey = !!justPressedKey && keyboardActionTriggered('inferQuiet', keyState, justPressedKey);
 
-        if (isAltM || isMalone) {
+        if (isMenuKey || isInferKey) {
             logFunctionBegin('handleKeydown');
-            log('Trigger key combination detected');
+            log(`Keyboard trigger detected (key=${justPressedKey}, menu=${isMenuKey}, inferQuiet=${isInferKey})`);
             
-            // Check if we're in an input context - skip M alone trigger if so
-            // Alt+M should still work in input fields, but M alone should not
-            if (isMalone && isInEditableContext(event)) {
-                log('M alone in editable context (input/textarea/contenteditable), skipping trigger');
+            // Don't fire keyboard triggers while typing in a field.
+            if (isInEditableContext(event)) {
+                log('In editable context (input/textarea/contenteditable), skipping keyboard trigger');
                 logFunctionEnd('handleKeydown');
                 return;
             }
@@ -4073,6 +4169,17 @@
             event.preventDefault();
             event.stopPropagation();
             log('Did prevent default and stop propagation');
+
+            // Quiet auto-infer (no menu): copy the hovered link via the capture-aware compiler.
+            if (isInferKey) {
+                const inferHovered = document.elementFromPoint(mouseX, mouseY);
+                const inferAnchor = inferHovered ? inferHovered.closest('a') : null;
+                const inferRawUrl = inferAnchor ? extractUrlFromAnchor(inferAnchor, event) : window.location.href;
+                log('Keyboard auto-infer: copying single link without menu');
+                compileAndCopyBufferedLinks([{ url: inferRawUrl, anchor: inferAnchor }]);
+                logFunctionEnd('handleKeydown');
+                return;
+            }
 
             // elementFromPoint() returns topmost element at given coordinates
             // Uses tracked mouse position since keyboard events don't have clientX/Y
@@ -4176,14 +4283,14 @@
     let isZKeyDown = false;
     
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'z' || event.key === 'Z') {
-            isZKeyDown = true;
+        if (event.key && event.key.length === 1) {
+            pressedKeys.add(event.key.toLowerCase());
         }
     }, true);
     
     document.addEventListener('keyup', (event) => {
-        if (event.key === 'z' || event.key === 'Z') {
-            isZKeyDown = false;
+        if (event.key && event.key.length === 1) {
+            pressedKeys.delete(event.key.toLowerCase());
         }
     }, true);
     log('Did add keydown listener for key tracking');
@@ -4202,14 +4309,15 @@
         
         // Check if Alt+Z combo WAS active before this key release
         // At keyup time: event.altKey is already false for the Alt key, so we check what's being released
-        const isAltReleasing = event.key === 'Alt';
-        const isZReleasing = event.key === 'z' || event.key === 'Z';
-        const wasAltZActive = isAltZBufferActive;  // We use the flag we set during clicks
+        // The buffer stays active while its trigger keys are held (this keyup already removed the
+        // released key from pressedKeys via the capture-phase tracker), so re-evaluate the binding.
+        const wasAltZActive = isAltZBufferActive;
+        const bufferStillHeld = isAltZBufferActive && actionMatchesClick('inferBuffer', bindingState(event));
         
-        log(`Alt releasing: ${isAltReleasing}, Z releasing: ${isZReleasing}, Was Alt+Z active: ${wasAltZActive}`);
+        log(`Buffer still held: ${bufferStillHeld}, was active: ${wasAltZActive}`);
         
         // If Alt+Z combo was active and we're releasing Alt or Z, process buffer
-        if (wasAltZActive && (isAltReleasing || isZReleasing)) {
+        if (wasAltZActive && !bufferStillHeld) {
             log(`Alt+Z was deactivated, processing buffer with ${altZClickBuffer.length} buffered links`);
             
             // Deactivate buffer mode
@@ -4253,7 +4361,7 @@
     log('Did register contextmenu listener');
 
     log('All event listeners registered');
-    log('Triggers: Alt+Click (show menu), Alt+Z+Click (auto-infer), Alt+Right-Click, or Alt+M');
+    log('Triggers (configurable): hover+V = menu, hover+B = quiet copy, hold Z + click… = buffer list');
     log('Script initialization complete');
 
 })();
