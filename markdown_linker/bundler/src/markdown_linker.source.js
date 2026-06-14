@@ -154,7 +154,8 @@
         lastSelectionTimestamp = Date.now();
     });
 
-    // Alt+Z title preference options (first element is default)
+    // Quick-copy title preference options (first element is default).
+    // Storage key kept as-is for backward compatibility with saved preferences.
     const ALT_Z_TITLE_PREF_KEY = 'markdown_linker.altz_title_source';
     const ALT_Z_TITLE_OPTIONS = [
         { id: 'url-forward', label: 'URL (forward)' },
@@ -163,7 +164,6 @@
         { id: 'page', label: 'Page title' }
     ];
     let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
-    let altZMenuCommandId = null;
 
     // Source-capture preference: when "html & logs", every clipboard copy also POSTs the page
     // source + session logs to the local capture server (scripts/source_capture). Default: none.
@@ -277,11 +277,11 @@
     }
 
     // ============================================================================
-    // USER PREFERENCES (ALT+Z TITLE SOURCE)
+    // USER PREFERENCES (QUICK-COPY TITLE SOURCE)
     // ============================================================================
 
     /**
-     * Finds the metadata for a given Alt+Z title option ID
+     * Finds the metadata for a given quick-copy title option ID
      * @param {string} optionId - Identifier stored in preferences
      * @returns {{id: string, label: string}} Matching option (defaults if not found)
      */
@@ -290,8 +290,8 @@
     }
 
     /**
-     * Loads the persisted Alt+Z title preference from ViolentMonkey storage
-     * Falls back to default when storage is unavailable or value is invalid
+     * Loads the persisted quick-copy title preference from ViolentMonkey storage.
+     * Falls back to default when storage is unavailable or value is invalid.
      * @returns {string} Option ID representing the user's preference
      */
     function loadAltZTitlePreference() {
@@ -302,22 +302,22 @@
             try {
                 storedValue = GM_getValue(ALT_Z_TITLE_PREF_KEY, storedValue);
             } catch (error) {
-                logWarn(`Failed to load Alt+Z preference: ${error}`);
+                logWarn(`Failed to load quick-copy title preference: ${error}`);
             }
         }
 
         if (!ALT_Z_TITLE_OPTIONS.some((option) => option.id === storedValue)) {
-            logWarn(`Alt+Z preference "${storedValue}" invalid, reverting to default`);
+            logWarn(`Quick-copy title preference "${storedValue}" invalid, reverting to default`);
             storedValue = ALT_Z_TITLE_OPTIONS[0].id;
         }
 
-        log(`Loaded Alt+Z title preference: ${storedValue}`);
+        log(`Loaded quick-copy title preference: ${storedValue}`);
         logFunctionEnd('loadAltZTitlePreference');
         return storedValue;
     }
 
     /**
-     * Persists the current Alt+Z preference and refreshes the menu command label
+     * Persists the current quick-copy title preference and refreshes the settings panel if open.
      */
     function persistAltZTitlePreference() {
         logFunctionBegin('persistAltZTitlePreference');
@@ -325,60 +325,34 @@
             try {
                 GM_setValue(ALT_Z_TITLE_PREF_KEY, altZTitlePreference);
             } catch (error) {
-                logWarn(`Failed to persist Alt+Z preference: ${error}`);
+                logWarn(`Failed to persist quick-copy title preference: ${error}`);
             }
         }
-        registerAltZTitleMenuCommand();
+        refreshSettingsPanel();
         logFunctionEnd('persistAltZTitlePreference');
     }
 
     /**
-     * Registers (or re-registers) the ViolentMonkey menu command for cycling Alt+Z sources
-     */
-    function registerAltZTitleMenuCommand() {
-        logFunctionBegin('registerAltZTitleMenuCommand');
-        if (typeof GM_registerMenuCommand !== 'function') {
-            log('GM_registerMenuCommand unavailable, skipping menu registration');
-            logFunctionEnd('registerAltZTitleMenuCommand');
-            return;
-        }
-
-        if (altZMenuCommandId && typeof GM_unregisterMenuCommand === 'function') {
-            try {
-                GM_unregisterMenuCommand(altZMenuCommandId);
-            } catch (error) {
-                logWarn(`Failed to unregister previous menu command: ${error}`);
-            }
-        }
-
-        const optionLabel = getAltZOption(altZTitlePreference).label;
-        const menuLabel = `Alt+Z title: ${optionLabel} (click to cycle)`;
-        altZMenuCommandId = GM_registerMenuCommand(menuLabel, cycleAltZTitlePreference);
-        logFunctionEnd('registerAltZTitleMenuCommand');
-    }
-
-    /**
-     * Cycles through Alt+Z title options and persists the newly selected value
+     * Advances to the next quick-copy title option, persists, and notifies the user.
      */
     function cycleAltZTitlePreference() {
         logFunctionBegin('cycleAltZTitlePreference');
         const currentIndex = ALT_Z_TITLE_OPTIONS.findIndex((option) => option.id === altZTitlePreference);
         const nextIndex = (currentIndex + 1) % ALT_Z_TITLE_OPTIONS.length;
         altZTitlePreference = ALT_Z_TITLE_OPTIONS[nextIndex].id;
-        log(`Alt+Z preference changed to: ${altZTitlePreference}`);
+        log(`Quick-copy title preference changed to: ${altZTitlePreference}`);
         persistAltZTitlePreference();
         const optionLabel = getAltZOption(altZTitlePreference).label;
-        showNotification(`Alt+Z title source: ${optionLabel}`);
+        showNotification(`Quick-copy title: ${optionLabel}`);
         logFunctionEnd('cycleAltZTitlePreference');
     }
 
     /**
-     * Initializes Alt+Z preference state and registers control surfaces
+     * Initializes quick-copy title preference state from storage.
      */
     function initializeAltZPreference() {
         logFunctionBegin('initializeAltZPreference');
         altZTitlePreference = loadAltZTitlePreference();
-        registerAltZTitleMenuCommand();
         logFunctionEnd('initializeAltZPreference');
     }
 
@@ -4107,6 +4081,43 @@
             row.appendChild(right);
             body.appendChild(row);
         });
+
+        // ---- Preferences section ----
+        const prefSectionLabel = document.createElement('div');
+        prefSectionLabel.textContent = 'Preferences';
+        prefSectionLabel.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(248,249,250,0.45);margin-top:14px;margin-bottom:4px;';
+        body.appendChild(prefSectionLabel);
+
+        // Quick-copy title row
+        const titleRow = document.createElement('div');
+        titleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);';
+        const titleLeft = document.createElement('div');
+        const titleName = document.createElement('div');
+        titleName.textContent = 'Quick-copy title';
+        titleName.style.cssText = 'font-size:13px;color:#f8f9fa;';
+        const titleValueLabel = document.createElement('div');
+        titleValueLabel.textContent = getAltZOption(altZTitlePreference).label;
+        titleValueLabel.style.cssText = 'font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;';
+        titleLeft.appendChild(titleName);
+        titleLeft.appendChild(titleValueLabel);
+        const titleRight = document.createElement('div');
+        const cycleButton = document.createElement('button');
+        cycleButton.textContent = 'Cycle';
+        styleSettingsButton(cycleButton);
+        cycleButton.addEventListener('click', (event) => { event.stopPropagation(); cycleAltZTitlePreference(); });
+        const titleResetButton = document.createElement('button');
+        titleResetButton.textContent = 'Reset';
+        styleSettingsButton(titleResetButton);
+        titleResetButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+            persistAltZTitlePreference();
+        });
+        titleRight.appendChild(cycleButton);
+        titleRight.appendChild(titleResetButton);
+        titleRow.appendChild(titleLeft);
+        titleRow.appendChild(titleRight);
+        body.appendChild(titleRow);
     }
 
     function refreshSettingsPanel() {
@@ -4129,7 +4140,7 @@
         panel.id = 'markdown-linker-settings';
         panel.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:#1f1f1f;color:#f8f9fa;border:1px solid rgba(255,255,255,0.25);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.6);z-index:1000000;font-family:sans-serif;padding:16px;';
         const title = document.createElement('div');
-        title.textContent = 'Markdown Linker — Triggers';
+        title.textContent = 'Markdown Linker — Settings';
         title.style.cssText = 'font-size:15px;font-weight:600;margin-bottom:4px;';
         const hint = document.createElement('div');
         hint.textContent = 'Click Record, then press your keys and/or click. Esc cancels.';
@@ -4165,7 +4176,7 @@
     /** Registers the ViolentMonkey menu command that opens the trigger settings panel. */
     function registerSettingsMenuCommand() {
         if (typeof GM_registerMenuCommand === 'function') {
-            GM_registerMenuCommand('Markdown Linker: triggers…', openTriggerSettings);
+            GM_registerMenuCommand('Markdown Linker: settings…', openTriggerSettings);
         }
     }
 

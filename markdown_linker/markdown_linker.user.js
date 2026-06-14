@@ -3805,7 +3805,6 @@ ${textLink}`;
       { id: "page", label: "Page title" }
     ];
     let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
-    let altZMenuCommandId = null;
     const CAPTURE_MODE_PREF_KEY = "markdown_linker.capture_mode";
     const CAPTURE_MODE_OPTIONS = [
       { id: "none", label: "none" },
@@ -3875,14 +3874,14 @@ ${textLink}`;
         try {
           storedValue = GM_getValue(ALT_Z_TITLE_PREF_KEY, storedValue);
         } catch (error) {
-          logWarn(`Failed to load Alt+Z preference: ${error}`);
+          logWarn(`Failed to load quick-copy title preference: ${error}`);
         }
       }
       if (!ALT_Z_TITLE_OPTIONS.some((option) => option.id === storedValue)) {
-        logWarn(`Alt+Z preference "${storedValue}" invalid, reverting to default`);
+        logWarn(`Quick-copy title preference "${storedValue}" invalid, reverting to default`);
         storedValue = ALT_Z_TITLE_OPTIONS[0].id;
       }
-      log(`Loaded Alt+Z title preference: ${storedValue}`);
+      log(`Loaded quick-copy title preference: ${storedValue}`);
       logFunctionEnd("loadAltZTitlePreference");
       return storedValue;
     }
@@ -3892,46 +3891,26 @@ ${textLink}`;
         try {
           GM_setValue(ALT_Z_TITLE_PREF_KEY, altZTitlePreference);
         } catch (error) {
-          logWarn(`Failed to persist Alt+Z preference: ${error}`);
+          logWarn(`Failed to persist quick-copy title preference: ${error}`);
         }
       }
-      registerAltZTitleMenuCommand();
+      refreshSettingsPanel();
       logFunctionEnd("persistAltZTitlePreference");
-    }
-    function registerAltZTitleMenuCommand() {
-      logFunctionBegin("registerAltZTitleMenuCommand");
-      if (typeof GM_registerMenuCommand !== "function") {
-        log("GM_registerMenuCommand unavailable, skipping menu registration");
-        logFunctionEnd("registerAltZTitleMenuCommand");
-        return;
-      }
-      if (altZMenuCommandId && typeof GM_unregisterMenuCommand === "function") {
-        try {
-          GM_unregisterMenuCommand(altZMenuCommandId);
-        } catch (error) {
-          logWarn(`Failed to unregister previous menu command: ${error}`);
-        }
-      }
-      const optionLabel = getAltZOption(altZTitlePreference).label;
-      const menuLabel = `Alt+Z title: ${optionLabel} (click to cycle)`;
-      altZMenuCommandId = GM_registerMenuCommand(menuLabel, cycleAltZTitlePreference);
-      logFunctionEnd("registerAltZTitleMenuCommand");
     }
     function cycleAltZTitlePreference() {
       logFunctionBegin("cycleAltZTitlePreference");
       const currentIndex = ALT_Z_TITLE_OPTIONS.findIndex((option) => option.id === altZTitlePreference);
       const nextIndex = (currentIndex + 1) % ALT_Z_TITLE_OPTIONS.length;
       altZTitlePreference = ALT_Z_TITLE_OPTIONS[nextIndex].id;
-      log(`Alt+Z preference changed to: ${altZTitlePreference}`);
+      log(`Quick-copy title preference changed to: ${altZTitlePreference}`);
       persistAltZTitlePreference();
       const optionLabel = getAltZOption(altZTitlePreference).label;
-      showNotification(`Alt+Z title source: ${optionLabel}`);
+      showNotification(`Quick-copy title: ${optionLabel}`);
       logFunctionEnd("cycleAltZTitlePreference");
     }
     function initializeAltZPreference() {
       logFunctionBegin("initializeAltZPreference");
       altZTitlePreference = loadAltZTitlePreference();
-      registerAltZTitleMenuCommand();
       logFunctionEnd("initializeAltZPreference");
     }
     function getCaptureOption(optionId) {
@@ -6555,6 +6534,42 @@ ${document.documentElement.outerHTML}`;
         row.appendChild(right);
         body.appendChild(row);
       });
+      const prefSectionLabel = document.createElement("div");
+      prefSectionLabel.textContent = "Preferences";
+      prefSectionLabel.style.cssText = "font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(248,249,250,0.45);margin-top:14px;margin-bottom:4px;";
+      body.appendChild(prefSectionLabel);
+      const titleRow = document.createElement("div");
+      titleRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+      const titleLeft = document.createElement("div");
+      const titleName = document.createElement("div");
+      titleName.textContent = "Quick-copy title";
+      titleName.style.cssText = "font-size:13px;color:#f8f9fa;";
+      const titleValueLabel = document.createElement("div");
+      titleValueLabel.textContent = getAltZOption(altZTitlePreference).label;
+      titleValueLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+      titleLeft.appendChild(titleName);
+      titleLeft.appendChild(titleValueLabel);
+      const titleRight = document.createElement("div");
+      const cycleButton = document.createElement("button");
+      cycleButton.textContent = "Cycle";
+      styleSettingsButton(cycleButton);
+      cycleButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        cycleAltZTitlePreference();
+      });
+      const titleResetButton = document.createElement("button");
+      titleResetButton.textContent = "Reset";
+      styleSettingsButton(titleResetButton);
+      titleResetButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+        persistAltZTitlePreference();
+      });
+      titleRight.appendChild(cycleButton);
+      titleRight.appendChild(titleResetButton);
+      titleRow.appendChild(titleLeft);
+      titleRow.appendChild(titleRight);
+      body.appendChild(titleRow);
     }
     function refreshSettingsPanel() {
       if (settingsBodyEl) {
@@ -6574,7 +6589,7 @@ ${document.documentElement.outerHTML}`;
       panel.id = "markdown-linker-settings";
       panel.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:#1f1f1f;color:#f8f9fa;border:1px solid rgba(255,255,255,0.25);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.6);z-index:1000000;font-family:sans-serif;padding:16px;";
       const title = document.createElement("div");
-      title.textContent = "Markdown Linker \u2014 Triggers";
+      title.textContent = "Markdown Linker \u2014 Settings";
       title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:4px;";
       const hint = document.createElement("div");
       hint.textContent = "Click Record, then press your keys and/or click. Esc cancels.";
@@ -6611,7 +6626,7 @@ ${document.documentElement.outerHTML}`;
     }
     function registerSettingsMenuCommand() {
       if (typeof GM_registerMenuCommand === "function") {
-        GM_registerMenuCommand("Markdown Linker: triggers\u2026", openTriggerSettings);
+        GM_registerMenuCommand("Markdown Linker: settings\u2026", openTriggerSettings);
       }
     }
     function handleClick(event) {
