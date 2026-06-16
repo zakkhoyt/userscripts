@@ -3446,7 +3446,7 @@
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: rgba(28, 28, 30, 0.94);
+            background: rgba(30, 28, 36, 0.88);
             border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 8px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
@@ -3458,7 +3458,7 @@
             max-width: 520px;
             width: max-content;
             color: #f8f9fa;
-            backdrop-filter: blur(8px) saturate(160%);
+            backdrop-filter: blur(20px) brightness(0.35);
         `;
         log('Did create menu element');
 
@@ -3678,7 +3678,7 @@
                 // Single light hairline — no dual-line dark/light effect
                 const headerLine = document.createElement('div');
                 headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.45);
+                    border-top: 1px solid rgba(255, 255, 255, 0.28);
                 `;
 
                 const headerLabel = document.createElement('div');
