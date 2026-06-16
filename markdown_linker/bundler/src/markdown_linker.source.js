@@ -3678,8 +3678,7 @@
                 // Single light hairline — no dual-line dark/light effect
                 const headerLine = document.createElement('div');
                 headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.30);
-                    margin: 0 8px;
+                    border-top: 1px solid rgba(255, 255, 255, 0.45);
                 `;
 
                 const headerLabel = document.createElement('div');
