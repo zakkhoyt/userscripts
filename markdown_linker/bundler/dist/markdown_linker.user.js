@@ -6003,19 +6003,19 @@ ${document.documentElement.outerHTML}`;
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: rgba(18, 19, 22, 0.78);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 14px;
-            box-shadow: 0 22px 45px rgba(0, 0, 0, 0.65);
-            padding: 6px 0;
+            background: rgba(28, 28, 30, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+            padding: 4px 0;
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 11px;
+            font-size: 13px;
             min-width: 220px;
             max-width: 520px;
             width: max-content;
             color: #f8f9fa;
-            backdrop-filter: blur(26px) saturate(120%);
+            backdrop-filter: blur(8px) saturate(160%);
         `;
       log("Did create menu element");
       log("Will build menu options array");
@@ -6184,31 +6184,29 @@ ${document.documentElement.outerHTML}`;
       }
       log(`Did build ${options.length} menu options`);
       log("Will create menu items");
+      let isFirstSectionHeader = true;
       options.forEach((option, index) => {
         const debugLabel = option.displayValue ? `${option.label}: ${option.displayValue}` : option.label;
         log(`Creating menu item ${index}: "${debugLabel}"`);
         if (option.isSectionHeader) {
           const headerWrapper = document.createElement("div");
-          headerWrapper.style.cssText = `
-                    margin-top: 12px;
-                    padding: 0 12px;
-                `;
+          headerWrapper.style.cssText = `margin-top: ${isFirstSectionHeader ? "2px" : "8px"};`;
+          isFirstSectionHeader = false;
           const headerLine = document.createElement("div");
           headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.55);
-                    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+                    border-top: 1px solid rgba(255, 255, 255, 0.15);
+                    margin: 0 8px;
                 `;
           const headerLabel = document.createElement("div");
           headerLabel.textContent = option.label;
           headerLabel.style.cssText = `
-                    margin-top: 6px;
-                    padding: 4px 2px 2px;
+                    margin-top: 3px;
+                    padding: 2px 0 2px 8px;
                     text-transform: uppercase;
                     letter-spacing: 0.18em;
                     font-size: 10px;
                     font-weight: 600;
-                    color: rgba(255, 255, 255, 0.85);
-                    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+                    color: rgba(255, 255, 255, 0.45);
                 `;
           headerWrapper.appendChild(headerLine);
           headerWrapper.appendChild(headerLabel);
@@ -6217,10 +6215,10 @@ ${document.documentElement.outerHTML}`;
         }
         const item = document.createElement("div");
         item.style.cssText = `
-                padding: 8px 14px;
+                padding: 4px 14px 4px 20px;
                 cursor: pointer;
                 white-space: normal;
-                line-height: 1.4;
+                line-height: 1.3;
                 word-break: break-word;
                 color: inherit;
                 background-color: transparent;
@@ -6234,19 +6232,19 @@ ${document.documentElement.outerHTML}`;
                     font-size: 10px;
                     text-transform: uppercase;
                     letter-spacing: 0.08em;
-                    color: rgba(248, 249, 250, 0.65);
-                    margin-bottom: 2px;
+                    color: rgba(248, 249, 250, 0.5);
+                    margin-bottom: 1px;
                 `;
           valueElement = document.createElement("div");
           valueElement.textContent = option.displayValue;
           valueElement.style.cssText = `
-                    font-size: 12px;
+                    font-size: 13px;
                     color: #f8f9fa;
                 `;
         } else {
           labelElement.textContent = option.label;
           labelElement.style.cssText = `
-                    font-size: 12px;
+                    font-size: 13px;
                     color: #f8f9fa;
                 `;
         }
