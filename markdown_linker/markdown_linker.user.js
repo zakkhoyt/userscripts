@@ -3763,7 +3763,7 @@ ${textLink}`;
   (function() {
     "use strict";
     console.log(`markdown_linker: 11`);
-    const isDebug = true;
+    let isDebug = false;
     let logBase = "markdown_linker";
     let activeNotification = null;
     let currentMenu = null;
@@ -3797,6 +3797,7 @@ ${textLink}`;
       lastNonEmptySelection = text;
       lastSelectionTimestamp = Date.now();
     });
+    const IS_DEBUG_PREF_KEY = "markdown_linker.is_debug";
     const ALT_Z_TITLE_PREF_KEY = "markdown_linker.altz_title_source";
     const ALT_Z_TITLE_OPTIONS = [
       { id: "url-forward", label: "URL (forward)" },
@@ -3913,6 +3914,44 @@ ${textLink}`;
       altZTitlePreference = loadAltZTitlePreference();
       logFunctionEnd("initializeAltZPreference");
     }
+    function loadIsDebug() {
+      logFunctionBegin("loadIsDebug");
+      let stored = false;
+      if (typeof GM_getValue === "function") {
+        try {
+          stored = GM_getValue(IS_DEBUG_PREF_KEY, false);
+        } catch (error) {
+        }
+      }
+      const value = stored === true || stored === "true";
+      logFunctionEnd("loadIsDebug");
+      return value;
+    }
+    function persistIsDebug() {
+      logFunctionBegin("persistIsDebug");
+      if (typeof GM_setValue === "function") {
+        try {
+          GM_setValue(IS_DEBUG_PREF_KEY, isDebug);
+        } catch (error) {
+          logWarn(`Failed to persist debug mode: ${error}`);
+        }
+      }
+      refreshSettingsPanel();
+      logFunctionEnd("persistIsDebug");
+    }
+    function toggleIsDebug() {
+      logFunctionBegin("toggleIsDebug");
+      isDebug = !isDebug;
+      log(`Debug mode changed to: ${isDebug}`);
+      persistIsDebug();
+      showNotification(`Debug mode: ${isDebug ? "on" : "off"}`);
+      logFunctionEnd("toggleIsDebug");
+    }
+    function initializeIsDebug() {
+      logFunctionBegin("initializeIsDebug");
+      isDebug = loadIsDebug();
+      logFunctionEnd("initializeIsDebug");
+    }
     function getCaptureOption(optionId) {
       return CAPTURE_MODE_OPTIONS.find((option) => option.id === optionId) || CAPTURE_MODE_OPTIONS[0];
     }
@@ -3982,6 +4021,7 @@ ${textLink}`;
       logFunctionEnd("initializeCaptureMode");
     }
     log("begin script");
+    initializeIsDebug();
     initializeAltZPreference();
     initializeCaptureMode();
     triggers = loadTriggers();
@@ -5920,6 +5960,14 @@ ${document.documentElement.outerHTML}`;
           action: () => {
             cycleCaptureMode();
           }
+        },
+        {
+          label: "Debug mode",
+          displayValue: isDebug ? "on" : "off",
+          tooltip: "Enable console logging and reveal the Developer section in the popup.",
+          action: () => {
+            toggleIsDebug();
+          }
         }
       ];
     }
@@ -6108,6 +6156,32 @@ ${document.documentElement.outerHTML}`;
       });
       options.push({ isSectionHeader: true, label: "Settings" });
       buildSettingsMenuOptions().forEach((item) => options.push(item));
+      if (isDebug) {
+        options.push({ isSectionHeader: true, label: "Developer" });
+        options.push({
+          label: "Copy page state",
+          displayValue: "JSON to clipboard",
+          tooltip: "Copies current URL, title, capture mode, and debug state as JSON.",
+          action: () => {
+            const state = {
+              url: capturedUrl,
+              title: getPageTitle(),
+              captureMode,
+              isDebug,
+              altZTitlePreference,
+              isAnchor,
+              anchorHref: isAnchor && anchor ? anchor.href : null
+            };
+            try {
+              GM_setClipboard(JSON.stringify(state, null, 2), "text/plain");
+              showNotification("Page state copied to clipboard");
+            } catch (error) {
+              logError(`Copy page state failed: ${error}`);
+            }
+            removeMenu();
+          }
+        });
+      }
       log(`Did build ${options.length} menu options`);
       log("Will create menu items");
       options.forEach((option, index) => {
@@ -6666,6 +6740,29 @@ ${document.documentElement.outerHTML}`;
       titleRow.appendChild(titleLeft);
       titleRow.appendChild(titleRight);
       body.appendChild(titleRow);
+      const debugRow = document.createElement("div");
+      debugRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+      const debugLeft = document.createElement("div");
+      const debugName = document.createElement("div");
+      debugName.textContent = "Debug mode";
+      debugName.style.cssText = "font-size:13px;color:#f8f9fa;";
+      const debugValueLabel = document.createElement("div");
+      debugValueLabel.textContent = isDebug ? "on" : "off";
+      debugValueLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+      debugLeft.appendChild(debugName);
+      debugLeft.appendChild(debugValueLabel);
+      const debugRight = document.createElement("div");
+      const debugToggleButton = document.createElement("button");
+      debugToggleButton.textContent = "Toggle";
+      styleSettingsButton(debugToggleButton);
+      debugToggleButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleIsDebug();
+      });
+      debugRight.appendChild(debugToggleButton);
+      debugRow.appendChild(debugLeft);
+      debugRow.appendChild(debugRight);
+      body.appendChild(debugRow);
     }
     function refreshSettingsPanel() {
       if (settingsBodyEl) {
@@ -6822,12 +6919,6 @@ ${document.documentElement.outerHTML}`;
     function handleContextMenu(event) {
       logFunctionBegin("handleContextMenu");
       log("Context menu (right-click) event received");
-      const contextState = bindingState(event);
-      if (!actionMatchesClick("menu", contextState)) {
-        log("No menu trigger matched on right-click, returning");
-        logFunctionEnd("handleContextMenu");
-        return;
-      }
       log("Will prevent default and stop propagation");
       event.preventDefault();
       event.stopPropagation();

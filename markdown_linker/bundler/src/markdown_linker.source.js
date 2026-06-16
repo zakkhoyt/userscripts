@@ -88,9 +88,10 @@
     // CONFIGURATION
     // ============================================================================
     
-    // Enable debug mode to show error dialogs with debugger option
-    // Type: boolean
-    const isDebug = true;
+    // Debug mode — controls console logging and reveals the Developer popup section.
+    // Loaded from storage at startup; default false. Changed via Settings panel/popup.
+    // Type: boolean (mutable — loaded and toggled at runtime)
+    let isDebug = false;
     
     // Script identifier prefix for all console.log statements
     // Type: string
@@ -153,6 +154,9 @@
         lastNonEmptySelection = text;
         lastSelectionTimestamp = Date.now();
     });
+
+    // Debug-mode storage key
+    const IS_DEBUG_PREF_KEY = 'markdown_linker.is_debug';
 
     // Quick-copy title preference options (first element is default).
     // Storage key kept as-is for backward compatibility with saved preferences.
@@ -357,6 +361,66 @@
     }
 
     // ============================================================================
+    // USER PREFERENCES (DEBUG MODE)
+    // ============================================================================
+
+    /**
+     * Loads the persisted debug-mode flag from ViolentMonkey storage (defaults to false).
+     * @returns {boolean}
+     */
+    function loadIsDebug() {
+        logFunctionBegin('loadIsDebug');
+        let stored = false;
+        if (typeof GM_getValue === 'function') {
+            try {
+                stored = GM_getValue(IS_DEBUG_PREF_KEY, false);
+            } catch (error) {
+                // logWarn not yet safe here — just swallow
+            }
+        }
+        const value = stored === true || stored === 'true';
+        logFunctionEnd('loadIsDebug');
+        return value;
+    }
+
+    /**
+     * Persists the current isDebug flag to ViolentMonkey storage and refreshes the settings panel.
+     */
+    function persistIsDebug() {
+        logFunctionBegin('persistIsDebug');
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(IS_DEBUG_PREF_KEY, isDebug);
+            } catch (error) {
+                logWarn(`Failed to persist debug mode: ${error}`);
+            }
+        }
+        refreshSettingsPanel();
+        logFunctionEnd('persistIsDebug');
+    }
+
+    /**
+     * Toggles debug mode on/off, persists, and notifies the user.
+     */
+    function toggleIsDebug() {
+        logFunctionBegin('toggleIsDebug');
+        isDebug = !isDebug;
+        log(`Debug mode changed to: ${isDebug}`);
+        persistIsDebug();
+        showNotification(`Debug mode: ${isDebug ? 'on' : 'off'}`);
+        logFunctionEnd('toggleIsDebug');
+    }
+
+    /**
+     * Initializes debug-mode state from storage.
+     */
+    function initializeIsDebug() {
+        logFunctionBegin('initializeIsDebug');
+        isDebug = loadIsDebug();
+        logFunctionEnd('initializeIsDebug');
+    }
+
+    // ============================================================================
     // USER PREFERENCES (SOURCE CAPTURE)
     // ============================================================================
 
@@ -461,6 +525,7 @@
     }
 
     log('begin script');
+    initializeIsDebug();
     initializeAltZPreference();
     initializeCaptureMode();
     triggers = loadTriggers();
@@ -3293,6 +3358,12 @@
                 displayValue: getCaptureOption(captureMode).label,
                 tooltip: 'Toggle source+log capture to the local capture server.',
                 action: () => { cycleCaptureMode(); }
+            },
+            {
+                label: 'Debug mode',
+                displayValue: isDebug ? 'on' : 'off',
+                tooltip: 'Enable console logging and reveal the Developer section in the popup.',
+                action: () => { toggleIsDebug(); }
             }
         ];
     }
@@ -3560,6 +3631,34 @@
         // e. Settings section
         options.push({ isSectionHeader: true, label: 'Settings' });
         buildSettingsMenuOptions().forEach((item) => options.push(item));
+
+        // f. Developer section — only visible when debug mode is on
+        if (isDebug) {
+            options.push({ isSectionHeader: true, label: 'Developer' });
+            options.push({
+                label: 'Copy page state',
+                displayValue: 'JSON to clipboard',
+                tooltip: 'Copies current URL, title, capture mode, and debug state as JSON.',
+                action: () => {
+                    const state = {
+                        url: capturedUrl,
+                        title: getPageTitle(),
+                        captureMode,
+                        isDebug,
+                        altZTitlePreference,
+                        isAnchor,
+                        anchorHref: isAnchor && anchor ? anchor.href : null
+                    };
+                    try {
+                        GM_setClipboard(JSON.stringify(state, null, 2), 'text/plain');
+                        showNotification('Page state copied to clipboard');
+                    } catch (error) {
+                        logError(`Copy page state failed: ${error}`);
+                    }
+                    removeMenu();
+                }
+            });
+        }
 
         log(`Did build ${options.length} menu options`);
 
@@ -4218,6 +4317,28 @@
         titleRow.appendChild(titleLeft);
         titleRow.appendChild(titleRight);
         body.appendChild(titleRow);
+
+        // Debug mode row
+        const debugRow = document.createElement('div');
+        debugRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);';
+        const debugLeft = document.createElement('div');
+        const debugName = document.createElement('div');
+        debugName.textContent = 'Debug mode';
+        debugName.style.cssText = 'font-size:13px;color:#f8f9fa;';
+        const debugValueLabel = document.createElement('div');
+        debugValueLabel.textContent = isDebug ? 'on' : 'off';
+        debugValueLabel.style.cssText = 'font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;';
+        debugLeft.appendChild(debugName);
+        debugLeft.appendChild(debugValueLabel);
+        const debugRight = document.createElement('div');
+        const debugToggleButton = document.createElement('button');
+        debugToggleButton.textContent = 'Toggle';
+        styleSettingsButton(debugToggleButton);
+        debugToggleButton.addEventListener('click', (event) => { event.stopPropagation(); toggleIsDebug(); });
+        debugRight.appendChild(debugToggleButton);
+        debugRow.appendChild(debugLeft);
+        debugRow.appendChild(debugRight);
+        body.appendChild(debugRow);
     }
 
     function refreshSettingsPanel() {
@@ -4416,12 +4537,8 @@
         logFunctionBegin('handleContextMenu');
         log('Context menu (right-click) event received');
 
-        const contextState = bindingState(event);
-        if (!actionMatchesClick('menu', contextState)) {
-            log('No menu trigger matched on right-click, returning');
-            logFunctionEnd('handleContextMenu');
-            return;
-        }
+        // Right-click always opens the popup — no modifier-key requirement.
+        // (The left-click handleClick path still requires the 'menu' binding.)
 
         // Prevent browser's default context menu from appearing
         log('Will prevent default and stop propagation');
