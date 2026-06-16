@@ -3446,7 +3446,7 @@
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: rgba(30, 28, 36, 0.88);
+            background: rgba(32, 30, 36, 0.82);
             border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 8px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
@@ -3458,7 +3458,7 @@
             max-width: 520px;
             width: max-content;
             color: #f8f9fa;
-            backdrop-filter: blur(20px) brightness(0.35);
+            backdrop-filter: blur(20px);
         `;
         log('Did create menu element');
 
