@@ -3675,10 +3675,12 @@
                 headerWrapper.style.cssText = `margin-top: ${isFirstSectionHeader ? '2px' : '8px'};`;
                 isFirstSectionHeader = false;
 
-                // Single light hairline — no dual-line dark/light effect
+                // Explicit 1px block — more reliable than border-top on zero-height div
                 const headerLine = document.createElement('div');
                 headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.40);
+                    height: 1px;
+                    background: rgba(255, 255, 255, 0.40);
+                    margin: 0 6px 4px 6px;
                 `;
 
                 const headerLabel = document.createElement('div');
@@ -3777,7 +3779,7 @@
             }
 
             item.addEventListener('mouseenter', () => {
-                item.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                item.style.backgroundColor = 'color-mix(in srgb, Highlight 18%, transparent)';
             });
 
             item.addEventListener('mouseleave', () => {

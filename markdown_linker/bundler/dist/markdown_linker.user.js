@@ -6194,7 +6194,9 @@ ${document.documentElement.outerHTML}`;
           isFirstSectionHeader = false;
           const headerLine = document.createElement("div");
           headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.40);
+                    height: 1px;
+                    background: rgba(255, 255, 255, 0.40);
+                    margin: 0 6px 4px 6px;
                 `;
           const headerLabel = document.createElement("div");
           headerLabel.textContent = option.label;
@@ -6297,7 +6299,7 @@ ${document.documentElement.outerHTML}`;
           }
         }
         item.addEventListener("mouseenter", () => {
-          item.style.backgroundColor = "rgba(255, 255, 255, 0.08)";
+          item.style.backgroundColor = "color-mix(in srgb, Highlight 18%, transparent)";
         });
         item.addEventListener("mouseleave", () => {
           item.style.backgroundColor = "transparent";
