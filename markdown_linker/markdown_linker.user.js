@@ -6919,6 +6919,12 @@ ${document.documentElement.outerHTML}`;
     function handleContextMenu(event) {
       logFunctionBegin("handleContextMenu");
       log("Context menu (right-click) event received");
+      const contextState = bindingState(event);
+      if (!actionMatchesClick("menu", contextState)) {
+        log("No menu trigger matched on right-click, returning");
+        logFunctionEnd("handleContextMenu");
+        return;
+      }
       log("Will prevent default and stop propagation");
       event.preventDefault();
       event.stopPropagation();

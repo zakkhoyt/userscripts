@@ -3763,7 +3763,7 @@ ${textLink}`;
   (function() {
     "use strict";
     console.log(`markdown_linker: 11`);
-    const isDebug = true;
+    let isDebug = false;
     let logBase = "markdown_linker";
     let activeNotification = null;
     let currentMenu = null;
@@ -3797,6 +3797,7 @@ ${textLink}`;
       lastNonEmptySelection = text;
       lastSelectionTimestamp = Date.now();
     });
+    const IS_DEBUG_PREF_KEY = "markdown_linker.is_debug";
     const ALT_Z_TITLE_PREF_KEY = "markdown_linker.altz_title_source";
     const ALT_Z_TITLE_OPTIONS = [
       { id: "url-forward", label: "URL (forward)" },
@@ -3805,7 +3806,6 @@ ${textLink}`;
       { id: "page", label: "Page title" }
     ];
     let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
-    let altZMenuCommandId = null;
     const CAPTURE_MODE_PREF_KEY = "markdown_linker.capture_mode";
     const CAPTURE_MODE_OPTIONS = [
       { id: "none", label: "none" },
@@ -3875,14 +3875,14 @@ ${textLink}`;
         try {
           storedValue = GM_getValue(ALT_Z_TITLE_PREF_KEY, storedValue);
         } catch (error) {
-          logWarn(`Failed to load Alt+Z preference: ${error}`);
+          logWarn(`Failed to load quick-copy title preference: ${error}`);
         }
       }
       if (!ALT_Z_TITLE_OPTIONS.some((option) => option.id === storedValue)) {
-        logWarn(`Alt+Z preference "${storedValue}" invalid, reverting to default`);
+        logWarn(`Quick-copy title preference "${storedValue}" invalid, reverting to default`);
         storedValue = ALT_Z_TITLE_OPTIONS[0].id;
       }
-      log(`Loaded Alt+Z title preference: ${storedValue}`);
+      log(`Loaded quick-copy title preference: ${storedValue}`);
       logFunctionEnd("loadAltZTitlePreference");
       return storedValue;
     }
@@ -3892,47 +3892,65 @@ ${textLink}`;
         try {
           GM_setValue(ALT_Z_TITLE_PREF_KEY, altZTitlePreference);
         } catch (error) {
-          logWarn(`Failed to persist Alt+Z preference: ${error}`);
+          logWarn(`Failed to persist quick-copy title preference: ${error}`);
         }
       }
-      registerAltZTitleMenuCommand();
+      refreshSettingsPanel();
       logFunctionEnd("persistAltZTitlePreference");
-    }
-    function registerAltZTitleMenuCommand() {
-      logFunctionBegin("registerAltZTitleMenuCommand");
-      if (typeof GM_registerMenuCommand !== "function") {
-        log("GM_registerMenuCommand unavailable, skipping menu registration");
-        logFunctionEnd("registerAltZTitleMenuCommand");
-        return;
-      }
-      if (altZMenuCommandId && typeof GM_unregisterMenuCommand === "function") {
-        try {
-          GM_unregisterMenuCommand(altZMenuCommandId);
-        } catch (error) {
-          logWarn(`Failed to unregister previous menu command: ${error}`);
-        }
-      }
-      const optionLabel = getAltZOption(altZTitlePreference).label;
-      const menuLabel = `Alt+Z title: ${optionLabel} (click to cycle)`;
-      altZMenuCommandId = GM_registerMenuCommand(menuLabel, cycleAltZTitlePreference);
-      logFunctionEnd("registerAltZTitleMenuCommand");
     }
     function cycleAltZTitlePreference() {
       logFunctionBegin("cycleAltZTitlePreference");
       const currentIndex = ALT_Z_TITLE_OPTIONS.findIndex((option) => option.id === altZTitlePreference);
       const nextIndex = (currentIndex + 1) % ALT_Z_TITLE_OPTIONS.length;
       altZTitlePreference = ALT_Z_TITLE_OPTIONS[nextIndex].id;
-      log(`Alt+Z preference changed to: ${altZTitlePreference}`);
+      log(`Quick-copy title preference changed to: ${altZTitlePreference}`);
       persistAltZTitlePreference();
       const optionLabel = getAltZOption(altZTitlePreference).label;
-      showNotification(`Alt+Z title source: ${optionLabel}`);
+      showNotification(`Quick-copy title: ${optionLabel}`);
       logFunctionEnd("cycleAltZTitlePreference");
     }
     function initializeAltZPreference() {
       logFunctionBegin("initializeAltZPreference");
       altZTitlePreference = loadAltZTitlePreference();
-      registerAltZTitleMenuCommand();
       logFunctionEnd("initializeAltZPreference");
+    }
+    function loadIsDebug() {
+      logFunctionBegin("loadIsDebug");
+      let stored = false;
+      if (typeof GM_getValue === "function") {
+        try {
+          stored = GM_getValue(IS_DEBUG_PREF_KEY, false);
+        } catch (error) {
+        }
+      }
+      const value = stored === true || stored === "true";
+      logFunctionEnd("loadIsDebug");
+      return value;
+    }
+    function persistIsDebug() {
+      logFunctionBegin("persistIsDebug");
+      if (typeof GM_setValue === "function") {
+        try {
+          GM_setValue(IS_DEBUG_PREF_KEY, isDebug);
+        } catch (error) {
+          logWarn(`Failed to persist debug mode: ${error}`);
+        }
+      }
+      refreshSettingsPanel();
+      logFunctionEnd("persistIsDebug");
+    }
+    function toggleIsDebug() {
+      logFunctionBegin("toggleIsDebug");
+      isDebug = !isDebug;
+      log(`Debug mode changed to: ${isDebug}`);
+      persistIsDebug();
+      showNotification(`Debug mode: ${isDebug ? "on" : "off"}`);
+      logFunctionEnd("toggleIsDebug");
+    }
+    function initializeIsDebug() {
+      logFunctionBegin("initializeIsDebug");
+      isDebug = loadIsDebug();
+      logFunctionEnd("initializeIsDebug");
     }
     function getCaptureOption(optionId) {
       return CAPTURE_MODE_OPTIONS.find((option) => option.id === optionId) || CAPTURE_MODE_OPTIONS[0];
@@ -4003,6 +4021,7 @@ ${textLink}`;
       logFunctionEnd("initializeCaptureMode");
     }
     log("begin script");
+    initializeIsDebug();
     initializeAltZPreference();
     initializeCaptureMode();
     triggers = loadTriggers();
@@ -4452,6 +4471,7 @@ ${textLink}`;
       const option = {
         label: "Timestamp",
         displayValue: decoratedTitle,
+        tooltip: "Link to the video at the current playback position.",
         getResult: () => ({
           title: decoratedTitle,
           url: timestampUrl
@@ -4515,6 +4535,7 @@ ${textLink}`;
           options.push({
             label: "Video Title",
             displayValue: videoTitle,
+            tooltip: "Title from YouTube video metadata.",
             getResult: () => ({
               title: videoTitle,
               url: capturedUrl
@@ -4535,6 +4556,7 @@ ${textLink}`;
           options.push({
             label: "Playlist Markdown",
             displayValue: `${context.playlist.videos.length} entries`,
+            tooltip: "All playlist entries as a flat markdown bullet list.",
             getValue: () => playlistMarkdown,
             isAllLinks: true
           });
@@ -4544,6 +4566,7 @@ ${textLink}`;
         options.push({
           label: "Playlist Link",
           displayValue: playlistTitle,
+          tooltip: "Link to the YouTube playlist.",
           getResult: () => ({
             title: context.playlist.title ? `YouTube Playlist: ${context.playlist.title}` : "YouTube Playlist",
             url: context.playlist.url || capturedUrl
@@ -4555,6 +4578,7 @@ ${textLink}`;
         options.push({
           label: "Channel Link",
           displayValue: context.channel.title,
+          tooltip: "Link to the YouTube channel page.",
           getResult: () => ({
             title: `YouTube Channel: ${context.channel.title}`,
             url: context.channel.canonicalUrl || capturedUrl
@@ -5910,7 +5934,44 @@ ${document.documentElement.outerHTML}`;
       logFunctionEnd("buildAmazonProductMarkdown");
       return markdown;
     }
-    function createMenu(x, y, isAnchor, anchor = null) {
+    function buildSettingsMenuOptions() {
+      return [
+        {
+          label: "Open settings\u2026",
+          displayValue: "Triggers and preferences",
+          tooltip: "Opens the Markdown Linker settings panel where you can configure key bindings and preferences.",
+          action: () => {
+            openTriggerSettings();
+            removeMenu();
+          }
+        },
+        {
+          label: "Quick-copy title",
+          displayValue: getAltZOption(altZTitlePreference).label,
+          tooltip: "Title format used for quiet copy and buffer copy. Click to cycle.",
+          action: () => {
+            cycleAltZTitlePreference();
+          }
+        },
+        {
+          label: "Capture",
+          displayValue: getCaptureOption(captureMode).label,
+          tooltip: "Toggle source+log capture to the local capture server.",
+          action: () => {
+            cycleCaptureMode();
+          }
+        },
+        {
+          label: "Debug mode",
+          displayValue: isDebug ? "on" : "off",
+          tooltip: "Enable console logging and reveal the Developer section in the popup.",
+          action: () => {
+            toggleIsDebug();
+          }
+        }
+      ];
+    }
+    function createMenu(x, y, isAnchor, anchor = null, isContextMenu = false) {
       logFunctionBegin("createMenu");
       log(`Will create menu at position (${x}, ${y}), isAnchor: ${isAnchor}`);
       const capturedUrl = cleanUrl(targetUrl) || targetUrl;
@@ -5958,72 +6019,14 @@ ${document.documentElement.outerHTML}`;
         `;
       log("Did create menu element");
       log("Will build menu options array");
-      const options = [];
-      const domainSectionOptions = [];
-      if (isAnchor) {
-        log("Is anchor, will get link text");
-        const linkText = getLinkText(anchor);
-        if (linkText) {
-          log(`Did get link text, adding to options: "${linkText}"`);
-          options.push({
-            label: "Link Text",
-            displayValue: linkText,
-            getValue: () => linkText
-          });
-        } else {
-          log("No link text available");
-        }
-      }
-      log("Will get page title");
-      const pageTitle = getPageTitle();
-      if (pageTitle) {
-        log(`Did get page title, adding to options: "${pageTitle}"`);
-        options.push({
-          label: "Page Title",
-          displayValue: pageTitle,
-          getValue: () => pageTitle
-        });
-      } else {
-        log("No page title available");
-      }
-      if (capturedUrl) {
-        log("Will build URL component title option");
-        const urlComponentTitle = getUrlComponentTitle(capturedUrl);
-        if (urlComponentTitle) {
-          log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
-          options.push({
-            label: "URL (forward)",
-            displayValue: urlComponentTitle,
-            getValue: () => urlComponentTitle
-          });
-        } else {
-          log("URL component title unavailable");
-        }
-        const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: "reverse" });
-        if (urlComponentTitleLRU) {
-          log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
-          options.push({
-            label: "URL (reverse)",
-            displayValue: urlComponentTitleLRU,
-            getValue: () => urlComponentTitleLRU
-          });
-        } else {
-          log("Reverse URL component title unavailable");
-        }
-      }
+      const domainSectionItems = [];
       if (youtubeContext) {
         log("YouTube context available, will append specialized menu options");
         const youtubeOptions = buildYouTubeMenuOptions(youtubeContext, capturedUrl);
-        if (youtubeOptions.length > 0) {
-          domainSectionOptions.push({
-            isSectionHeader: true,
-            label: "YouTube"
-          });
-          youtubeOptions.forEach((optionDescriptor) => {
-            log(`Queueing YouTube option: ${optionDescriptor.label}`);
-            domainSectionOptions.push(optionDescriptor);
-          });
-        }
+        youtubeOptions.forEach((optionDescriptor) => {
+          log(`Queueing YouTube option: ${optionDescriptor.label}`);
+          domainSectionItems.push(optionDescriptor);
+        });
       }
       if (shouldEmitAmazonProductBlock(capturedUrl, !isAnchor)) {
         log("Amazon product detected for current page, will build product details option");
@@ -6036,13 +6039,10 @@ ${document.documentElement.outerHTML}`;
         const amazonBlock = amazonProductData ? buildAmazonProductMarkdown(amazonProductData, capturedUrl) : null;
         if (amazonBlock) {
           const amazonTitle = amazonProductData.titleCleaned || amazonProductData.title || "Product details";
-          domainSectionOptions.push({
-            isSectionHeader: true,
-            label: "Amazon"
-          });
-          domainSectionOptions.push({
+          domainSectionItems.push({
             label: "Amazon Product",
             displayValue: amazonTitle,
+            tooltip: "Full product details block (title, ASIN, price) as a markdown snippet.",
             getValue: () => amazonBlock,
             isAllLinks: true
           });
@@ -6051,12 +6051,67 @@ ${document.documentElement.outerHTML}`;
           log("No Amazon product details available for this URL");
         }
       }
+      const commonItems = [];
+      if (isAnchor) {
+        log("Is anchor, will get link text");
+        const linkText = getLinkText(anchor);
+        if (linkText) {
+          log(`Did get link text, adding to options: "${linkText}"`);
+          commonItems.push({
+            label: "Link Text",
+            displayValue: linkText,
+            getValue: () => linkText
+          });
+        } else {
+          log("No link text available");
+        }
+      }
+      log("Will get page title");
+      const pageTitle = getPageTitle();
+      if (pageTitle) {
+        log(`Did get page title, adding to options: "${pageTitle}"`);
+        commonItems.push({
+          label: "Page Title",
+          displayValue: pageTitle,
+          tooltip: "Current document.title; may include notification counts or site suffixes.",
+          getValue: () => pageTitle
+        });
+      } else {
+        log("No page title available");
+      }
+      if (capturedUrl) {
+        log("Will build URL component title option");
+        const urlComponentTitle = getUrlComponentTitle(capturedUrl);
+        if (urlComponentTitle) {
+          log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
+          commonItems.push({
+            label: "URL (forward)",
+            displayValue: urlComponentTitle,
+            tooltip: "Domain \u2192 path segments left-to-right.",
+            getValue: () => urlComponentTitle
+          });
+        } else {
+          log("URL component title unavailable");
+        }
+        const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: "reverse" });
+        if (urlComponentTitleLRU) {
+          log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
+          commonItems.push({
+            label: "URL (reverse)",
+            displayValue: urlComponentTitleLRU,
+            tooltip: "Domain \u2190 path segments right-to-left (most-specific first).",
+            getValue: () => urlComponentTitleLRU
+          });
+        } else {
+          log("Reverse URL component title unavailable");
+        }
+      }
       if (!isAnchor && !youtubeContext) {
         log("Not anchor, will get meta description");
         const metaDesc = getMetaDescription();
         if (metaDesc) {
           log(`Did get meta description, adding to options: "${metaDesc}"`);
-          options.push({
+          commonItems.push({
             label: "Meta Description",
             displayValue: metaDesc,
             getValue: () => metaDesc
@@ -6065,25 +6120,68 @@ ${document.documentElement.outerHTML}`;
           log("No meta description available");
         }
       }
-      if (domainSectionOptions.length > 0) {
-        log(`Adding ${domainSectionOptions.length} domain-specific entries (including headers)`);
-        domainSectionOptions.forEach((optionDescriptor) => options.push(optionDescriptor));
+      const options = [];
+      if (isContextMenu) {
+        options.push({
+          label: "Quick copy",
+          displayValue: `${getAltZOption(altZTitlePreference).label} \u2014 no menu`,
+          action: () => {
+            compileAndCopyBufferedLinks([{ url: capturedUrl, anchor: isAnchor ? anchor : null }]);
+            removeMenu();
+          }
+        });
       }
+      if (domainSectionItems.length > 0) {
+        log(`Adding ${domainSectionItems.length} domain-specific items`);
+        options.push({ isSectionHeader: true, label: "Domain Specific" });
+        domainSectionItems.forEach((item) => options.push(item));
+      }
+      options.push({ isSectionHeader: true, label: "Common" });
+      commonItems.forEach((item) => options.push(item));
       log("Adding extract all links options");
+      options.push({ isSectionHeader: true, label: "Lists" });
       options.push({
         label: "All Links (flat)",
         displayValue: "Single-level list",
+        tooltip: "All anchors on the page as a flat bullet list.",
         getValue: extractAllLinksFlat,
-        isAllLinks: true,
-        isSeparator: true
-        // Add visual separator above this item
+        isAllLinks: true
       });
       options.push({
         label: "All Links (tree)",
         displayValue: "Preserves heading depth",
+        tooltip: "All anchors grouped under the nearest heading (preserves document structure).",
         getValue: extractAllLinksHierarchical,
         isAllLinks: true
       });
+      options.push({ isSectionHeader: true, label: "Settings" });
+      buildSettingsMenuOptions().forEach((item) => options.push(item));
+      if (isDebug) {
+        options.push({ isSectionHeader: true, label: "Developer" });
+        options.push({
+          label: "Copy page state",
+          displayValue: "JSON to clipboard",
+          tooltip: "Copies current URL, title, capture mode, and debug state as JSON.",
+          action: () => {
+            const state = {
+              url: capturedUrl,
+              title: getPageTitle(),
+              captureMode,
+              isDebug,
+              altZTitlePreference,
+              isAnchor,
+              anchorHref: isAnchor && anchor ? anchor.href : null
+            };
+            try {
+              GM_setClipboard(JSON.stringify(state, null, 2), "text/plain");
+              showNotification("Page state copied to clipboard");
+            } catch (error) {
+              logError(`Copy page state failed: ${error}`);
+            }
+            removeMenu();
+          }
+        });
+      }
       log(`Did build ${options.length} menu options`);
       log("Will create menu items");
       options.forEach((option, index) => {
@@ -6127,9 +6225,9 @@ ${document.documentElement.outerHTML}`;
                 color: inherit;
                 background-color: transparent;
                 transition: background-color 120ms ease;
-                ${option.isSeparator ? "border-top: 2px solid rgba(255,255,255,0.65); box-shadow: 0 -1px 0 rgba(0,0,0,0.65); margin-top: 12px; padding-top: 18px;" : ""}
             `;
         const labelElement = document.createElement("div");
+        let valueElement = null;
         if (option.displayValue) {
           labelElement.textContent = option.label;
           labelElement.style.cssText = `
@@ -6139,21 +6237,67 @@ ${document.documentElement.outerHTML}`;
                     color: rgba(248, 249, 250, 0.65);
                     margin-bottom: 2px;
                 `;
-          const valueElement = document.createElement("div");
+          valueElement = document.createElement("div");
           valueElement.textContent = option.displayValue;
           valueElement.style.cssText = `
                     font-size: 12px;
                     color: #f8f9fa;
                 `;
-          item.appendChild(labelElement);
-          item.appendChild(valueElement);
         } else {
           labelElement.textContent = option.label;
           labelElement.style.cssText = `
                     font-size: 12px;
                     color: #f8f9fa;
                 `;
+        }
+        if (option.tooltip) {
+          item.style.display = "flex";
+          item.style.alignItems = "flex-start";
+          const contentWrap = document.createElement("div");
+          contentWrap.style.cssText = "flex:1;min-width:0;";
+          contentWrap.appendChild(labelElement);
+          if (valueElement) {
+            contentWrap.appendChild(valueElement);
+          }
+          const icon = document.createElement("span");
+          icon.textContent = "\u24D8";
+          icon.style.cssText = "flex-shrink:0;margin-left:6px;margin-top:1px;opacity:0.45;cursor:help;user-select:none;font-size:11px;";
+          let tooltipBubble = null;
+          icon.addEventListener("mouseenter", () => {
+            tooltipBubble = document.createElement("div");
+            tooltipBubble.textContent = option.tooltip;
+            tooltipBubble.style.cssText = [
+              "position:fixed",
+              "z-index:1000001",
+              "max-width:240px",
+              "background:#111",
+              "color:#f8f9fa",
+              "border:1px solid rgba(255,255,255,0.2)",
+              "border-radius:6px",
+              "padding:6px 10px",
+              "font-size:11px",
+              "line-height:1.4",
+              "pointer-events:none",
+              "white-space:normal"
+            ].join(";");
+            document.body.appendChild(tooltipBubble);
+            const r = icon.getBoundingClientRect();
+            tooltipBubble.style.left = `${Math.min(r.left, window.innerWidth - 248)}px`;
+            tooltipBubble.style.top = `${Math.max(4, r.top - tooltipBubble.offsetHeight - 6)}px`;
+          });
+          icon.addEventListener("mouseleave", () => {
+            if (tooltipBubble) {
+              tooltipBubble.remove();
+              tooltipBubble = null;
+            }
+          });
+          item.appendChild(contentWrap);
+          item.appendChild(icon);
+        } else {
           item.appendChild(labelElement);
+          if (valueElement) {
+            item.appendChild(valueElement);
+          }
         }
         item.addEventListener("mouseenter", () => {
           item.style.backgroundColor = "rgba(255, 255, 255, 0.08)";
@@ -6163,6 +6307,11 @@ ${document.documentElement.outerHTML}`;
         });
         item.addEventListener("click", () => {
           log(`Menu item clicked: "${option.label}"`);
+          if (option.action) {
+            log(`Settings action invoked: "${option.label}"`);
+            option.action();
+            return;
+          }
           if (option.isAllLinks) {
             log("All Links option selected, will extract all links");
             const allLinksMarkdown = option.getValue ? option.getValue() : null;
@@ -6555,6 +6704,65 @@ ${document.documentElement.outerHTML}`;
         row.appendChild(right);
         body.appendChild(row);
       });
+      const prefSectionLabel = document.createElement("div");
+      prefSectionLabel.textContent = "Preferences";
+      prefSectionLabel.style.cssText = "font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(248,249,250,0.45);margin-top:14px;margin-bottom:4px;";
+      body.appendChild(prefSectionLabel);
+      const titleRow = document.createElement("div");
+      titleRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+      const titleLeft = document.createElement("div");
+      const titleName = document.createElement("div");
+      titleName.textContent = "Quick-copy title";
+      titleName.style.cssText = "font-size:13px;color:#f8f9fa;";
+      const titleValueLabel = document.createElement("div");
+      titleValueLabel.textContent = getAltZOption(altZTitlePreference).label;
+      titleValueLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+      titleLeft.appendChild(titleName);
+      titleLeft.appendChild(titleValueLabel);
+      const titleRight = document.createElement("div");
+      const cycleButton = document.createElement("button");
+      cycleButton.textContent = "Cycle";
+      styleSettingsButton(cycleButton);
+      cycleButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        cycleAltZTitlePreference();
+      });
+      const titleResetButton = document.createElement("button");
+      titleResetButton.textContent = "Reset";
+      styleSettingsButton(titleResetButton);
+      titleResetButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+        persistAltZTitlePreference();
+      });
+      titleRight.appendChild(cycleButton);
+      titleRight.appendChild(titleResetButton);
+      titleRow.appendChild(titleLeft);
+      titleRow.appendChild(titleRight);
+      body.appendChild(titleRow);
+      const debugRow = document.createElement("div");
+      debugRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+      const debugLeft = document.createElement("div");
+      const debugName = document.createElement("div");
+      debugName.textContent = "Debug mode";
+      debugName.style.cssText = "font-size:13px;color:#f8f9fa;";
+      const debugValueLabel = document.createElement("div");
+      debugValueLabel.textContent = isDebug ? "on" : "off";
+      debugValueLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+      debugLeft.appendChild(debugName);
+      debugLeft.appendChild(debugValueLabel);
+      const debugRight = document.createElement("div");
+      const debugToggleButton = document.createElement("button");
+      debugToggleButton.textContent = "Toggle";
+      styleSettingsButton(debugToggleButton);
+      debugToggleButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleIsDebug();
+      });
+      debugRight.appendChild(debugToggleButton);
+      debugRow.appendChild(debugLeft);
+      debugRow.appendChild(debugRight);
+      body.appendChild(debugRow);
     }
     function refreshSettingsPanel() {
       if (settingsBodyEl) {
@@ -6574,7 +6782,7 @@ ${document.documentElement.outerHTML}`;
       panel.id = "markdown-linker-settings";
       panel.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:#1f1f1f;color:#f8f9fa;border:1px solid rgba(255,255,255,0.25);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.6);z-index:1000000;font-family:sans-serif;padding:16px;";
       const title = document.createElement("div");
-      title.textContent = "Markdown Linker \u2014 Triggers";
+      title.textContent = "Markdown Linker \u2014 Settings";
       title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:4px;";
       const hint = document.createElement("div");
       hint.textContent = "Click Record, then press your keys and/or click. Esc cancels.";
@@ -6611,7 +6819,7 @@ ${document.documentElement.outerHTML}`;
     }
     function registerSettingsMenuCommand() {
       if (typeof GM_registerMenuCommand === "function") {
-        GM_registerMenuCommand("Markdown Linker: triggers\u2026", openTriggerSettings);
+        GM_registerMenuCommand("Markdown Linker: settings\u2026", openTriggerSettings);
       }
     }
     function handleClick(event) {
@@ -6737,7 +6945,14 @@ ${document.documentElement.outerHTML}`;
             logFunctionEnd("handleContextMenu");
             return;
           }
-          createMenu(event.clientX, event.clientY, true, anchor);
+          createMenu(
+            event.clientX,
+            event.clientY,
+            true,
+            anchor,
+            true
+            /* isContextMenu */
+          );
         } else {
           logError("URL validation failed, using current page URL as fallback");
           targetUrl = window.location.href;
@@ -6749,7 +6964,14 @@ ${document.documentElement.outerHTML}`;
             logFunctionEnd("handleContextMenu");
             return;
           }
-          createMenu(event.clientX, event.clientY, false);
+          createMenu(
+            event.clientX,
+            event.clientY,
+            false,
+            null,
+            true
+            /* isContextMenu */
+          );
         }
       } else {
         log("Right-clicked on page (not an anchor)");
@@ -6762,7 +6984,14 @@ ${document.documentElement.outerHTML}`;
           logFunctionEnd("handleContextMenu");
           return;
         }
-        createMenu(event.clientX, event.clientY, false);
+        createMenu(
+          event.clientX,
+          event.clientY,
+          false,
+          null,
+          true
+          /* isContextMenu */
+        );
       }
       logFunctionEnd("handleContextMenu");
     }

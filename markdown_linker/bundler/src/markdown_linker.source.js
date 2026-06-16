@@ -4537,8 +4537,12 @@
         logFunctionBegin('handleContextMenu');
         log('Context menu (right-click) event received');
 
-        // Right-click always opens the popup — no modifier-key requirement.
-        // (The left-click handleClick path still requires the 'menu' binding.)
+        const contextState = bindingState(event);
+        if (!actionMatchesClick('menu', contextState)) {
+            log('No menu trigger matched on right-click, returning');
+            logFunctionEnd('handleContextMenu');
+            return;
+        }
 
         // Prevent browser's default context menu from appearing
         log('Will prevent default and stop propagation');
