@@ -6194,7 +6194,7 @@ ${document.documentElement.outerHTML}`;
           isFirstSectionHeader = false;
           const headerLine = document.createElement("div");
           headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.15);
+                    border-top: 1px solid rgba(255, 255, 255, 0.30);
                     margin: 0 8px;
                 `;
           const headerLabel = document.createElement("div");
