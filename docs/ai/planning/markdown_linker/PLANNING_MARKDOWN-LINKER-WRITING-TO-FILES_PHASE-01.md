@@ -1,4 +1,4 @@
-
+<!-- 
 # Saving HTML & JavaScript source code to disk
 
 ## Writing to files from userscripts
@@ -38,7 +38,7 @@ Make the post to the server at that time
 
 ## Server
 Sounds like we should implment this new server as it's own *.zsh script (please follow the zsh conventions listed in the rules under `~/.claude`). 
-
+ -->
 
 
 
