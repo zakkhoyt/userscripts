@@ -59,6 +59,28 @@ We will be working on
   * `common/amazon_toolkit/`
   * `common/youtube_toolkit/`
 
+
+# Broken menu
+* Today I got some older stale PRs merged. 
+* I went to sanity check that markdown_linker is still working as expected
+* I deployed a new builded build: `markdown_linker/bundler/dist/markdown_linker.user.js`
+* I found that markdown_linker is partially broken
+* I also tried running the previous dist: `markdown_linker/bundler/dist/markdown_linker-01.user.js`
+  * behaves the same way
+* Maybe this bug was from months ago and not from today's build
+
+
+## About the bug
+* holding `opt` while clicking on the page is supposed to bring up a popup menu, but it does not
+* holding `opt+z` while clicking on the page is supposed to copy the page link to the clipboard (default format) and animate a small green "LInk copied" view in the upper right, but did not
+* holding `opt+z` while clicking on a link, seemed to work, but the animation took a good many seconds to appears
+
+* In summary
+  * No popup menus are visible/animating no matter the source under the cursor
+  * The green status view is very sluggish to popup
+* Logs: `.gitignored/logs/markdown_linker.log`
+
+
 # About my environment
 * These userscripts are being written mainly for myself, though I might eventually publish some
   * macos (currently `26.4.1`)
@@ -98,6 +120,10 @@ We will be working on
 * I noticed this new feature in violentmonkey: [Inject scripts into different contexts](https://violentmonkey.github.io/posts/inject-into-context/) 
   * Does this have to do with our bundling problem?
   * Please summarize what this new feature is good for and what we could do with it. 
+
+
+
+
 
 
 ## ActionItems
