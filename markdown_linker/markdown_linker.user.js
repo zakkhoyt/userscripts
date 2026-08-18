@@ -6441,14 +6441,30 @@ ${document.documentElement.outerHTML}`;
       log("Did clear target variables");
       logFunctionEnd("removeMenu");
     }
+    function cloneTerm(term) {
+      const t = {
+        modifiers: Object.assign({}, term.modifiers),
+        keys: (term.keys || []).slice(),
+        requiresClick: !!term.requiresClick
+      };
+      if (term.clickCount != null) {
+        t.clickCount = term.clickCount;
+      }
+      if (term.rightClick) {
+        t.rightClick = true;
+      }
+      return t;
+    }
+    function cloneBinding(binding) {
+      if (binding.terms) {
+        return { modifiers: {}, keys: [], requiresClick: false, terms: binding.terms.map(cloneTerm) };
+      }
+      return cloneTerm(binding);
+    }
     function cloneTriggers(source) {
       const out = {};
       Object.keys(source || {}).forEach((action) => {
-        out[action] = (source[action] || []).map((binding) => ({
-          modifiers: Object.assign({}, binding.modifiers),
-          keys: (binding.keys || []).slice(),
-          requiresClick: !!binding.requiresClick
-        }));
+        out[action] = (source[action] || []).map(cloneBinding);
       });
       return out;
     }
@@ -6461,6 +6477,12 @@ ${document.documentElement.outerHTML}`;
       };
     }
     function bindingHasInput(binding) {
+      if (binding.terms) {
+        return binding.terms.length > 0;
+      }
+      if (binding.requiresClick) {
+        return true;
+      }
       const m = binding.modifiers || {};
       return binding.keys && binding.keys.length > 0 || !!(m.meta || m.ctrl || m.alt || m.shift);
     }
@@ -6480,13 +6502,89 @@ ${document.documentElement.outerHTML}`;
       }
       return true;
     }
-    function actionMatchesClick(actionName, state) {
+    function actionMatchesClick(actionName, state, clickCount, isRightClick) {
       const list = triggers[actionName] || [];
-      return list.some((binding) => binding && binding.requiresClick && matchesBinding(binding, state));
+      const n = clickCount || 1;
+      const right = !!isRightClick;
+      return list.some((binding) => {
+        if (!binding) {
+          return false;
+        }
+        if (binding.terms) {
+          const progress = chordProgress[actionName];
+          const lastIdx = binding.terms.length - 1;
+          if (!progress || progress.nextTermIdx !== lastIdx) {
+            return false;
+          }
+          const lastTerm = binding.terms[lastIdx];
+          if (!lastTerm || !lastTerm.requiresClick) {
+            return false;
+          }
+          if (!matchesBinding(lastTerm, state)) {
+            return false;
+          }
+          if ((lastTerm.clickCount || 1) !== n) {
+            return false;
+          }
+          return !!lastTerm.rightClick === right;
+        }
+        if (!binding.requiresClick) {
+          return false;
+        }
+        if (!matchesBinding(binding, state)) {
+          return false;
+        }
+        if ((binding.clickCount || 1) !== n) {
+          return false;
+        }
+        return !!binding.rightClick === right;
+      });
     }
     function keyboardActionTriggered(actionName, state, justPressedKey) {
       const list = triggers[actionName] || [];
-      return list.some((binding) => binding && !binding.requiresClick && (binding.keys || []).indexOf(justPressedKey) !== -1 && matchesBinding(binding, state));
+      return list.some((binding) => binding && !binding.requiresClick && !binding.terms && (binding.keys || []).indexOf(justPressedKey) !== -1 && matchesBinding(binding, state));
+    }
+    const chordProgress = {};
+    function clearChordProgress(actionName) {
+      const p = chordProgress[actionName];
+      if (p && p.timer) {
+        clearTimeout(p.timer);
+      }
+      delete chordProgress[actionName];
+    }
+    function chordActionResult(actionName, state, justPressedKey) {
+      const list = triggers[actionName] || [];
+      const progress = chordProgress[actionName];
+      for (let bi = 0; bi < list.length; bi++) {
+        const binding = list[bi];
+        if (!binding || !binding.terms || binding.terms.length === 0) {
+          continue;
+        }
+        const expectedIdx = progress && progress.bindingIndex === bi ? progress.nextTermIdx : 0;
+        const term = binding.terms[expectedIdx];
+        if (!term || term.requiresClick) {
+          continue;
+        }
+        if ((term.keys || []).indexOf(justPressedKey) === -1) {
+          continue;
+        }
+        if (!matchesBinding(term, state)) {
+          continue;
+        }
+        clearChordProgress(actionName);
+        if (expectedIdx + 1 >= binding.terms.length) {
+          return "complete";
+        }
+        const timer = setTimeout(() => {
+          delete chordProgress[actionName];
+        }, 1500);
+        chordProgress[actionName] = { bindingIndex: bi, nextTermIdx: expectedIdx + 1, timer };
+        return "advance";
+      }
+      if (progress) {
+        clearChordProgress(actionName);
+      }
+      return null;
     }
     function loadTriggers() {
       if (typeof GM_getValue === "function") {
@@ -6523,11 +6621,16 @@ ${document.documentElement.outerHTML}`;
     let settingsBodyEl = null;
     let recordingAction = null;
     let recordOverlayEl = null;
-    let recordModifiers = null;
-    let recordKeys = null;
-    function formatBinding(binding) {
+    let recordTerms = [];
+    let recordCurrentModifiers = null;
+    let recordCurrentKeys = null;
+    let recordCurrentClickCount = 0;
+    let recordCurrentRightClick = false;
+    let recordChordTimer = null;
+    let recordClickTimer = null;
+    function formatTerm(term) {
       const parts = [];
-      const m = binding.modifiers || {};
+      const m = term.modifiers || {};
       if (m.meta) {
         parts.push("\u2318");
       }
@@ -6540,12 +6643,21 @@ ${document.documentElement.outerHTML}`;
       if (m.shift) {
         parts.push("\u21E7");
       }
-      (binding.keys || []).forEach((key) => parts.push(key.toUpperCase()));
-      let label = parts.join(" + ") || "(unset)";
-      if (binding.requiresClick) {
-        label = `${label} + click`;
+      (term.keys || []).forEach((key) => parts.push(key.toUpperCase()));
+      let label = parts.join("+");
+      if (term.requiresClick) {
+        const n = term.clickCount || 1;
+        const clickLabel = term.rightClick ? n >= 2 ? "double-right-click" : "right-click" : n === 2 ? "double-click" : n >= 3 ? `${n}\xD7click` : "click";
+        label = label ? `${label}+${clickLabel}` : clickLabel;
       }
-      return label;
+      return label || "(none)";
+    }
+    function formatBinding(binding) {
+      if (binding.terms && binding.terms.length > 0) {
+        const termLabels = binding.terms.map(formatTerm);
+        return termLabels.length >= 2 ? `[${termLabels.join(" ")}]` : termLabels[0] || "(none)";
+      }
+      return formatTerm(binding);
     }
     function formatActionBindings(actionName) {
       const list = triggers[actionName] || [];
@@ -6554,13 +6666,38 @@ ${document.documentElement.outerHTML}`;
     function styleSettingsButton(button) {
       button.style.cssText = "margin-left:8px;padding:3px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#f8f9fa;font-size:12px;cursor:pointer;";
     }
+    function resetCurrentTerm() {
+      recordCurrentModifiers = { meta: false, ctrl: false, alt: false, shift: false };
+      recordCurrentKeys = /* @__PURE__ */ new Set();
+      recordCurrentClickCount = 0;
+      recordCurrentRightClick = false;
+    }
+    function clearRecordTimers() {
+      if (recordChordTimer) {
+        clearTimeout(recordChordTimer);
+        recordChordTimer = null;
+      }
+      if (recordClickTimer) {
+        clearTimeout(recordClickTimer);
+        recordClickTimer = null;
+      }
+    }
     function updateRecordOverlay() {
       if (!recordOverlayEl) {
         return;
       }
       const preview = recordOverlayEl.querySelector("#markdown-linker-record-preview");
-      if (preview) {
-        preview.textContent = `${formatBinding({ modifiers: recordModifiers, keys: Array.from(recordKeys) })} \u2026`;
+      if (!preview) {
+        return;
+      }
+      const completedLabels = recordTerms.map(formatBinding);
+      const hasCurrent = recordCurrentKeys && recordCurrentKeys.size > 0;
+      const currentLabel = hasCurrent ? formatTerm({ modifiers: recordCurrentModifiers || {}, keys: Array.from(recordCurrentKeys) }) + " \u2026" : "";
+      const allParts = completedLabels.concat(currentLabel ? [currentLabel] : completedLabels.length === 0 ? ["\u2026"] : []);
+      if (allParts.length >= 2) {
+        preview.textContent = `[${allParts.join(" ")}]`;
+      } else {
+        preview.textContent = allParts[0] || "\u2026";
       }
     }
     function hideRecordOverlay() {
@@ -6580,7 +6717,7 @@ ${document.documentElement.outerHTML}`;
       heading.textContent = `Recording: ${ACTION_LABELS[actionName] || actionName}`;
       heading.style.cssText = "font-size:18px;font-weight:600;margin-bottom:8px;";
       const instr = document.createElement("div");
-      instr.textContent = "Press your keys, then click anywhere \u2014 or just release the keys for a keyboard-only trigger. Esc to cancel.";
+      instr.textContent = "Press keys and release to end each term; pause 500 ms to commit the chord. Click or right-click ends immediately. Esc cancels.";
       instr.style.cssText = "font-size:13px;opacity:0.8;margin-bottom:12px;";
       const preview = document.createElement("div");
       preview.id = "markdown-linker-record-preview";
@@ -6594,53 +6731,44 @@ ${document.documentElement.outerHTML}`;
       recordOverlayEl = overlay;
     }
     function accumulateRecordModifiers(event) {
-      const state = bindingState(event);
-      recordModifiers.meta = recordModifiers.meta || state.meta;
-      recordModifiers.ctrl = recordModifiers.ctrl || state.ctrl;
-      recordModifiers.alt = recordModifiers.alt || state.alt;
-      recordModifiers.shift = recordModifiers.shift || state.shift;
-    }
-    function recordKeydownHandler(event) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.key === "Escape") {
-        stopRecording();
+      if (!recordCurrentModifiers) {
         return;
       }
-      accumulateRecordModifiers(event);
-      if (event.key && event.key.length === 1) {
-        recordKeys.add(event.key.toLowerCase());
-      }
-      updateRecordOverlay();
+      const state = bindingState(event);
+      recordCurrentModifiers.meta = recordCurrentModifiers.meta || state.meta;
+      recordCurrentModifiers.ctrl = recordCurrentModifiers.ctrl || state.ctrl;
+      recordCurrentModifiers.alt = recordCurrentModifiers.alt || state.alt;
+      recordCurrentModifiers.shift = recordCurrentModifiers.shift || state.shift;
     }
-    function recordKeyupHandler(event) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (recordKeys && recordKeys.size > 0) {
-        commitRecording(false);
-      }
+    function captureTerm(requiresClick, clickCount, rightClick) {
+      return {
+        modifiers: {
+          meta: !!(recordCurrentModifiers && recordCurrentModifiers.meta),
+          ctrl: !!(recordCurrentModifiers && recordCurrentModifiers.ctrl),
+          alt: !!(recordCurrentModifiers && recordCurrentModifiers.alt),
+          shift: !!(recordCurrentModifiers && recordCurrentModifiers.shift)
+        },
+        keys: Array.from(recordCurrentKeys || []),
+        requiresClick: !!requiresClick,
+        ...requiresClick && clickCount && clickCount > 1 ? { clickCount } : {},
+        ...requiresClick && rightClick ? { rightClick: true } : {}
+      };
     }
-    function recordClickHandler(event) {
-      event.preventDefault();
-      event.stopPropagation();
-      accumulateRecordModifiers(event);
-      commitRecording(true);
-    }
-    function commitRecording(requiresClick) {
+    function commitChord() {
       const action = recordingAction;
       if (!action) {
         return;
       }
-      const binding = {
-        modifiers: {
-          meta: !!recordModifiers.meta,
-          ctrl: !!recordModifiers.ctrl,
-          alt: !!recordModifiers.alt,
-          shift: !!recordModifiers.shift
-        },
-        keys: Array.from(recordKeys),
-        requiresClick: !!requiresClick
-      };
+      if (recordTerms.length === 0) {
+        stopRecording();
+        return;
+      }
+      let binding;
+      if (recordTerms.length === 1) {
+        binding = recordTerms[0];
+      } else {
+        binding = { modifiers: {}, keys: [], requiresClick: false, terms: recordTerms.slice() };
+      }
       if (!bindingHasInput(binding)) {
         stopRecording();
         return;
@@ -6650,22 +6778,81 @@ ${document.documentElement.outerHTML}`;
       log(`Recorded ${action} trigger: ${formatBinding(binding)}`);
       stopRecording();
     }
+    function recordKeydownHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        stopRecording();
+        return;
+      }
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      if (event.key && event.key.length === 1) {
+        recordCurrentKeys.add(event.key.toLowerCase());
+      }
+      updateRecordOverlay();
+    }
+    function recordKeyupHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (recordCurrentKeys && recordCurrentKeys.size > 0) {
+        recordTerms.push(captureTerm(false));
+        resetCurrentTerm();
+        recordChordTimer = setTimeout(() => {
+          recordChordTimer = null;
+          commitChord();
+        }, 500);
+        updateRecordOverlay();
+      }
+    }
+    function recordClickHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      recordCurrentClickCount++;
+      recordClickTimer = setTimeout(() => {
+        recordClickTimer = null;
+        recordTerms.push(captureTerm(true, recordCurrentClickCount, false));
+        resetCurrentTerm();
+        commitChord();
+      }, 300);
+      updateRecordOverlay();
+    }
+    function recordContextMenuHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      recordCurrentClickCount++;
+      recordCurrentRightClick = true;
+      recordClickTimer = setTimeout(() => {
+        recordClickTimer = null;
+        recordTerms.push(captureTerm(true, recordCurrentClickCount, true));
+        resetCurrentTerm();
+        commitChord();
+      }, 300);
+      updateRecordOverlay();
+    }
     function startRecording(actionName) {
       recordingAction = actionName;
-      recordModifiers = { meta: false, ctrl: false, alt: false, shift: false };
-      recordKeys = /* @__PURE__ */ new Set();
+      recordTerms = [];
+      resetCurrentTerm();
       window.addEventListener("keydown", recordKeydownHandler, true);
       window.addEventListener("keyup", recordKeyupHandler, true);
       window.addEventListener("click", recordClickHandler, true);
+      window.addEventListener("contextmenu", recordContextMenuHandler, true);
       showRecordOverlay(actionName);
     }
     function stopRecording() {
+      clearRecordTimers();
       window.removeEventListener("keydown", recordKeydownHandler, true);
       window.removeEventListener("keyup", recordKeyupHandler, true);
       window.removeEventListener("click", recordClickHandler, true);
+      window.removeEventListener("contextmenu", recordContextMenuHandler, true);
       recordingAction = null;
-      recordModifiers = null;
-      recordKeys = null;
+      recordTerms = [];
+      resetCurrentTerm();
       hideRecordOverlay();
       refreshSettingsPanel();
     }
@@ -6828,8 +7015,8 @@ ${document.documentElement.outerHTML}`;
       logFunctionBegin("handleClick");
       log("Click event received");
       const clickState = bindingState(event);
-      const menuClick = actionMatchesClick("menu", clickState);
-      const bufferClick = actionMatchesClick("inferBuffer", clickState);
+      const menuClick = actionMatchesClick("menu", clickState, event.detail || 1, false);
+      const bufferClick = actionMatchesClick("inferBuffer", clickState, event.detail || 1, false);
       log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
       if (!menuClick && !bufferClick) {
         log("No click trigger matched, returning");
@@ -6922,7 +7109,7 @@ ${document.documentElement.outerHTML}`;
       logFunctionBegin("handleContextMenu");
       log("Context menu (right-click) event received");
       const contextState = bindingState(event);
-      if (!actionMatchesClick("menu", contextState)) {
+      if (!actionMatchesClick("menu", contextState, event.detail || 1, true)) {
         log("No menu trigger matched on right-click, returning");
         logFunctionEnd("handleContextMenu");
         return;
@@ -7018,9 +7205,13 @@ ${document.documentElement.outerHTML}`;
       }
       const justPressedKey = event.key && event.key.length === 1 ? event.key.toLowerCase() : null;
       const keyState = bindingState(event);
-      const isMenuKey = !!justPressedKey && keyboardActionTriggered("menu", keyState, justPressedKey);
-      const isInferKey = !!justPressedKey && keyboardActionTriggered("inferQuiet", keyState, justPressedKey);
-      const isSettingsKey = !!justPressedKey && keyboardActionTriggered("openSettings", keyState, justPressedKey);
+      const menuChordResult = justPressedKey ? chordActionResult("menu", keyState, justPressedKey) : null;
+      const inferChordResult = justPressedKey ? chordActionResult("inferQuiet", keyState, justPressedKey) : null;
+      const settingsChordResult = justPressedKey ? chordActionResult("openSettings", keyState, justPressedKey) : null;
+      const isMenuKey = !!justPressedKey && (keyboardActionTriggered("menu", keyState, justPressedKey) || menuChordResult === "complete");
+      const isInferKey = !!justPressedKey && (keyboardActionTriggered("inferQuiet", keyState, justPressedKey) || inferChordResult === "complete");
+      const isSettingsKey = !!justPressedKey && (keyboardActionTriggered("openSettings", keyState, justPressedKey) || settingsChordResult === "complete");
+      const isChordAdvancing = menuChordResult === "advance" || inferChordResult === "advance" || settingsChordResult === "advance";
       if (isSettingsKey) {
         if (isInEditableContext(event)) {
           return;
@@ -7034,6 +7225,11 @@ ${document.documentElement.outerHTML}`;
         } else {
           openTriggerSettings();
         }
+        return;
+      }
+      if (isChordAdvancing) {
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (isMenuKey || isInferKey) {

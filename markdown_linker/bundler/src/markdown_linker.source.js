@@ -20,8 +20,8 @@
 
 // Development targets consumed by scripts/violentmonkey/violentmonkey.zsh
 // #dev-open https://developer.mozilla.org/en-US/docs/Web/API/Selection
-// ##dev-open https://www.youtube.com/watch?v=aqz-KE-bpKQ
-// ##dev-open https://www.youtube.com/playlist?list=PL590L5WQmH8cDj0KQvhZpW7x1YgnPZXoq
+// // #dev-open https://www.youtube.com/watch?v=aqz-KE-bpKQ
+// // out*/ #dev-open https://www.youtube.com/playlist?list=PL590L5WQmH8cDj0KQvhZpW7x1YgnPZXoq
 
 /*
  * Markdown Linker - ViolentMonkey Userscript
@@ -3977,17 +3977,33 @@
     // EVENT HANDLERS
     // ============================================================================
 
+    /** Deep-clones a single term (modifiers, keys, click flags). */
+    function cloneTerm(term) {
+        const t = {
+            modifiers: Object.assign({}, term.modifiers),
+            keys: (term.keys || []).slice(),
+            requiresClick: !!term.requiresClick,
+        };
+        if (term.clickCount != null) { t.clickCount = term.clickCount; }
+        if (term.rightClick) { t.rightClick = true; }
+        return t;
+    }
+
+    /** Deep-clones a binding, which may be a single-term shortcut or a chord (binding.terms[]). */
+    function cloneBinding(binding) {
+        if (binding.terms) {
+            return { modifiers: {}, keys: [], requiresClick: false, terms: binding.terms.map(cloneTerm) };
+        }
+        return cloneTerm(binding);
+    }
+
     /**
      * Deep-clones a triggers config (so defaults are never mutated).
      */
     function cloneTriggers(source) {
         const out = {};
         Object.keys(source || {}).forEach((action) => {
-            out[action] = (source[action] || []).map((binding) => ({
-                modifiers: Object.assign({}, binding.modifiers),
-                keys: (binding.keys || []).slice(),
-                requiresClick: !!binding.requiresClick
-            }));
+            out[action] = (source[action] || []).map(cloneBinding);
         });
         return out;
     }
@@ -4005,9 +4021,13 @@
     }
 
     /**
-     * True if a binding requires at least one key or modifier (never matches "no input").
+     * True if a binding requires at least one key, modifier, or click (never matches "no input").
+     * Chord bindings (binding.terms[]) are considered valid when they have at least one term.
+     * A bare click (requiresClick:true, no keys, no modifiers) is a valid trigger on its own.
      */
     function bindingHasInput(binding) {
+        if (binding.terms) { return binding.terms.length > 0; }
+        if (binding.requiresClick) { return true; }
         const m = binding.modifiers || {};
         return (binding.keys && binding.keys.length > 0) || !!(m.meta || m.ctrl || m.alt || m.shift);
     }
@@ -4034,23 +4054,92 @@
     }
 
     /**
-     * Does any click-type binding for `actionName` match the current state? (used on click events)
+     * Does any click-type binding for `actionName` match the current state?
+     * @param {string}  actionName
+     * @param {object}  state       - modifier state from bindingState(event)
+     * @param {number}  [clickCount=1]  - MouseEvent.detail (1=single, 2=double, …)
+     * @param {boolean} [isRightClick=false]
+     * Chord bindings whose last term is a click term are matched when chordProgress
+     * shows all prior terms have been completed.
      */
-    function actionMatchesClick(actionName, state) {
+    function actionMatchesClick(actionName, state, clickCount, isRightClick) {
         const list = triggers[actionName] || [];
-        return list.some((binding) => binding && binding.requiresClick && matchesBinding(binding, state));
+        const n = clickCount || 1;
+        const right = !!isRightClick;
+        return list.some((binding) => {
+            if (!binding) { return false; }
+            if (binding.terms) {
+                // Chord ending in a click: prior terms must already be completed.
+                const progress = chordProgress[actionName];
+                const lastIdx = binding.terms.length - 1;
+                if (!progress || progress.nextTermIdx !== lastIdx) { return false; }
+                const lastTerm = binding.terms[lastIdx];
+                if (!lastTerm || !lastTerm.requiresClick) { return false; }
+                if (!matchesBinding(lastTerm, state)) { return false; }
+                if ((lastTerm.clickCount || 1) !== n) { return false; }
+                return !!lastTerm.rightClick === right;
+            }
+            if (!binding.requiresClick) { return false; }
+            if (!matchesBinding(binding, state)) { return false; }
+            if ((binding.clickCount || 1) !== n) { return false; }
+            return !!binding.rightClick === right;
+        });
     }
 
     /**
      * Did the just-pressed key complete a keyboard-type binding for `actionName`? (used on keydown).
+     * Only fires for single-term (non-chord) bindings. Chord bindings are handled by chordActionResult.
      * Requiring `justPressedKey` to be part of the binding avoids re-firing on unrelated keydowns.
      */
     function keyboardActionTriggered(actionName, state, justPressedKey) {
         const list = triggers[actionName] || [];
         return list.some((binding) =>
-            binding && !binding.requiresClick &&
+            binding && !binding.requiresClick && !binding.terms &&
             (binding.keys || []).indexOf(justPressedKey) !== -1 &&
             matchesBinding(binding, state));
+    }
+
+    // ---- Chord-matching state machine ----
+    // Tracks per-action progress through multi-term chords.
+    // { [actionName]: { bindingIndex: number, nextTermIdx: number, timer: number } }
+    const chordProgress = {};
+
+    function clearChordProgress(actionName) {
+        const p = chordProgress[actionName];
+        if (p && p.timer) { clearTimeout(p.timer); }
+        delete chordProgress[actionName];
+    }
+
+    /**
+     * Advances chord matching for `actionName` on a keydown event.
+     * Returns:
+     *   'complete' — all terms matched; the action should fire now.
+     *   'advance'  — an intermediate term matched; waiting for the next term.
+     *   null       — no chord matched or advanced.
+     * A 1500 ms inactivity timer resets progress between terms.
+     */
+    function chordActionResult(actionName, state, justPressedKey) {
+        const list = triggers[actionName] || [];
+        const progress = chordProgress[actionName];
+        for (let bi = 0; bi < list.length; bi++) {
+            const binding = list[bi];
+            if (!binding || !binding.terms || binding.terms.length === 0) { continue; }
+            const expectedIdx = (progress && progress.bindingIndex === bi) ? progress.nextTermIdx : 0;
+            const term = binding.terms[expectedIdx];
+            if (!term || term.requiresClick) { continue; }
+            if ((term.keys || []).indexOf(justPressedKey) === -1) { continue; }
+            if (!matchesBinding(term, state)) { continue; }
+            // Term matched — advance or complete.
+            clearChordProgress(actionName);
+            if (expectedIdx + 1 >= binding.terms.length) {
+                return 'complete';
+            }
+            const timer = setTimeout(() => { delete chordProgress[actionName]; }, 1500);
+            chordProgress[actionName] = { bindingIndex: bi, nextTermIdx: expectedIdx + 1, timer };
+            return 'advance';
+        }
+        if (progress) { clearChordProgress(actionName); }
+        return null;
     }
 
     /**
@@ -4093,28 +4182,55 @@
     };
     let settingsPanelEl = null;
     let settingsBodyEl = null;
-    let recordingAction = null;
-    let recordOverlayEl = null;
-    let recordModifiers = null;
-    let recordKeys = null;
 
-    /** Human-readable label for one binding, e.g. "⌘ ⌃ + click", "V", "Z + click". */
-    function formatBinding(binding) {
+    // Recording state --------------------------------------------------------
+    let recordingAction   = null;
+    let recordOverlayEl   = null;
+    let recordTerms       = [];   // completed terms collected this session
+    let recordCurrentModifiers = null;
+    let recordCurrentKeys      = null;
+    let recordCurrentClickCount = 0;
+    let recordCurrentRightClick = false;
+    let recordChordTimer  = null; // between-term pause → commit on expiry
+    let recordClickTimer  = null; // multi-click accumulation window
+
+    /**
+     * Human-readable label for one term (one step of a chord).
+     * Examples: "⌘+K"  "⌥+Z+click"  "double-click"  "[⌘+K ⌘+S]"
+     */
+    function formatTerm(term) {
         const parts = [];
-        const m = binding.modifiers || {};
-        if (m.meta) { parts.push('⌘'); }
-        if (m.ctrl) { parts.push('⌃'); }
-        if (m.alt) { parts.push('⌥'); }
+        const m = term.modifiers || {};
+        if (m.meta)  { parts.push('⌘'); }
+        if (m.ctrl)  { parts.push('⌃'); }
+        if (m.alt)   { parts.push('⌥'); }
         if (m.shift) { parts.push('⇧'); }
-        (binding.keys || []).forEach((key) => parts.push(key.toUpperCase()));
-        let label = parts.join(' + ') || '(unset)';
-        if (binding.requiresClick) {
-            label = `${label} + click`;
+        (term.keys || []).forEach((key) => parts.push(key.toUpperCase()));
+        let label = parts.join('+');
+        if (term.requiresClick) {
+            const n = term.clickCount || 1;
+            const clickLabel = term.rightClick
+                ? (n >= 2 ? 'double-right-click' : 'right-click')
+                : (n === 2 ? 'double-click' : n >= 3 ? `${n}×click` : 'click');
+            label = label ? `${label}+${clickLabel}` : clickLabel;
         }
-        return label;
+        return label || '(none)';
     }
 
-    /** Combined label for all of an action's bindings. */
+    /**
+     * Human-readable label for one binding (single-term shortcut or multi-term chord).
+     *   Single term:   "⌘+K"
+     *   Two+ terms:    "[⌘+K ⌘+S]"  (square brackets for ≥ 2 terms)
+     */
+    function formatBinding(binding) {
+        if (binding.terms && binding.terms.length > 0) {
+            const termLabels = binding.terms.map(formatTerm);
+            return termLabels.length >= 2 ? `[${termLabels.join(' ')}]` : (termLabels[0] || '(none)');
+        }
+        return formatTerm(binding);
+    }
+
+    /** Combined label for all of an action's bindings, joined with "  or  ". */
     function formatActionBindings(actionName) {
         const list = triggers[actionName] || [];
         return list.length ? list.map(formatBinding).join('  or  ') : '(none)';
@@ -4124,11 +4240,32 @@
         button.style.cssText = 'margin-left:8px;padding:3px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#f8f9fa;font-size:12px;cursor:pointer;';
     }
 
+    function resetCurrentTerm() {
+        recordCurrentModifiers = { meta: false, ctrl: false, alt: false, shift: false };
+        recordCurrentKeys      = new Set();
+        recordCurrentClickCount = 0;
+        recordCurrentRightClick = false;
+    }
+
+    function clearRecordTimers() {
+        if (recordChordTimer) { clearTimeout(recordChordTimer); recordChordTimer = null; }
+        if (recordClickTimer) { clearTimeout(recordClickTimer); recordClickTimer = null; }
+    }
+
     function updateRecordOverlay() {
         if (!recordOverlayEl) { return; }
         const preview = recordOverlayEl.querySelector('#markdown-linker-record-preview');
-        if (preview) {
-            preview.textContent = `${formatBinding({ modifiers: recordModifiers, keys: Array.from(recordKeys) })} …`;
+        if (!preview) { return; }
+        const completedLabels = recordTerms.map(formatBinding);
+        const hasCurrent = recordCurrentKeys && recordCurrentKeys.size > 0;
+        const currentLabel = hasCurrent
+            ? formatTerm({ modifiers: recordCurrentModifiers || {}, keys: Array.from(recordCurrentKeys) }) + ' …'
+            : '';
+        const allParts = completedLabels.concat(currentLabel ? [currentLabel] : (completedLabels.length === 0 ? ['…'] : []));
+        if (allParts.length >= 2) {
+            preview.textContent = `[${allParts.join(' ')}]`;
+        } else {
+            preview.textContent = allParts[0] || '…';
         }
     }
 
@@ -4150,7 +4287,7 @@
         heading.textContent = `Recording: ${ACTION_LABELS[actionName] || actionName}`;
         heading.style.cssText = 'font-size:18px;font-weight:600;margin-bottom:8px;';
         const instr = document.createElement('div');
-        instr.textContent = 'Press your keys, then click anywhere — or just release the keys for a keyboard-only trigger. Esc to cancel.';
+        instr.textContent = 'Press keys and release to end each term; pause 500 ms to commit the chord. Click or right-click ends immediately. Esc cancels.';
         instr.style.cssText = 'font-size:13px;opacity:0.8;margin-bottom:12px;';
         const preview = document.createElement('div');
         preview.id = 'markdown-linker-record-preview';
@@ -4165,23 +4302,56 @@
     }
 
     function accumulateRecordModifiers(event) {
+        if (!recordCurrentModifiers) { return; }
         const state = bindingState(event);
-        recordModifiers.meta = recordModifiers.meta || state.meta;
-        recordModifiers.ctrl = recordModifiers.ctrl || state.ctrl;
-        recordModifiers.alt = recordModifiers.alt || state.alt;
-        recordModifiers.shift = recordModifiers.shift || state.shift;
+        recordCurrentModifiers.meta  = recordCurrentModifiers.meta  || state.meta;
+        recordCurrentModifiers.ctrl  = recordCurrentModifiers.ctrl  || state.ctrl;
+        recordCurrentModifiers.alt   = recordCurrentModifiers.alt   || state.alt;
+        recordCurrentModifiers.shift = recordCurrentModifiers.shift || state.shift;
+    }
+
+    function captureTerm(requiresClick, clickCount, rightClick) {
+        return {
+            modifiers: {
+                meta:  !!(recordCurrentModifiers && recordCurrentModifiers.meta),
+                ctrl:  !!(recordCurrentModifiers && recordCurrentModifiers.ctrl),
+                alt:   !!(recordCurrentModifiers && recordCurrentModifiers.alt),
+                shift: !!(recordCurrentModifiers && recordCurrentModifiers.shift),
+            },
+            keys: Array.from(recordCurrentKeys || []),
+            requiresClick: !!requiresClick,
+            ...(requiresClick && clickCount && clickCount > 1 ? { clickCount } : {}),
+            ...(requiresClick && rightClick ? { rightClick: true } : {}),
+        };
+    }
+
+    function commitChord() {
+        const action = recordingAction;
+        if (!action) { return; }
+        if (recordTerms.length === 0) { stopRecording(); return; }
+        let binding;
+        if (recordTerms.length === 1) {
+            // Single-term shortcut — keep the flat structure (backward-compatible).
+            binding = recordTerms[0];
+        } else {
+            // Multi-term chord — wrap in a `terms` array.
+            binding = { modifiers: {}, keys: [], requiresClick: false, terms: recordTerms.slice() };
+        }
+        if (!bindingHasInput(binding)) { stopRecording(); return; }
+        triggers[action] = [binding];
+        saveTriggers();
+        log(`Recorded ${action} trigger: ${formatBinding(binding)}`);
+        stopRecording();
     }
 
     function recordKeydownHandler(event) {
         event.preventDefault();
         event.stopPropagation();
-        if (event.key === 'Escape') {
-            stopRecording();
-            return;
-        }
+        if (event.key === 'Escape') { stopRecording(); return; }
+        clearRecordTimers(); // new keydown cancels the between-term pause timer
         accumulateRecordModifiers(event);
         if (event.key && event.key.length === 1) {
-            recordKeys.add(event.key.toLowerCase());
+            recordCurrentKeys.add(event.key.toLowerCase());
         }
         updateRecordOverlay();
     }
@@ -4189,63 +4359,76 @@
     function recordKeyupHandler(event) {
         event.preventDefault();
         event.stopPropagation();
-        // Commit a keyboard-only binding once at least one real (non-modifier) key was captured.
-        if (recordKeys && recordKeys.size > 0) {
-            commitRecording(false);
+        // Commit a term when the first non-modifier key is released.
+        if (recordCurrentKeys && recordCurrentKeys.size > 0) {
+            recordTerms.push(captureTerm(false));
+            resetCurrentTerm();
+            // Start between-term pause timer: commit the chord if nothing else is
+            // pressed within 500 ms. The user presses a new key to continue the chord.
+            recordChordTimer = setTimeout(() => {
+                recordChordTimer = null;
+                commitChord();
+            }, 500);
+            updateRecordOverlay();
         }
+        // Releasing a modifier with no keys yet does nothing (user may still add keys).
     }
 
     function recordClickHandler(event) {
         event.preventDefault();
         event.stopPropagation();
+        clearRecordTimers();
         accumulateRecordModifiers(event);
-        commitRecording(true);
+        recordCurrentClickCount++;
+        // Accumulate consecutive clicks within 300 ms as a multi-click term.
+        recordClickTimer = setTimeout(() => {
+            recordClickTimer = null;
+            recordTerms.push(captureTerm(true, recordCurrentClickCount, false));
+            resetCurrentTerm();
+            commitChord();
+        }, 300);
+        updateRecordOverlay();
     }
 
-    function commitRecording(requiresClick) {
-        const action = recordingAction;
-        if (!action) {
-            return;
-        }
-        const binding = {
-            modifiers: {
-                meta: !!recordModifiers.meta,
-                ctrl: !!recordModifiers.ctrl,
-                alt: !!recordModifiers.alt,
-                shift: !!recordModifiers.shift
-            },
-            keys: Array.from(recordKeys),
-            requiresClick: !!requiresClick
-        };
-        if (!bindingHasInput(binding)) {
-            stopRecording();
-            return;
-        }
-        triggers[action] = [binding]; // replace the action's bindings with the recorded one
-        saveTriggers();
-        log(`Recorded ${action} trigger: ${formatBinding(binding)}`);
-        stopRecording();
+    function recordContextMenuHandler(event) {
+        // Suppress browser context menu during recording; treat as a right-click term.
+        event.preventDefault();
+        event.stopPropagation();
+        clearRecordTimers();
+        accumulateRecordModifiers(event);
+        recordCurrentClickCount++;
+        recordCurrentRightClick = true;
+        recordClickTimer = setTimeout(() => {
+            recordClickTimer = null;
+            recordTerms.push(captureTerm(true, recordCurrentClickCount, true));
+            resetCurrentTerm();
+            commitChord();
+        }, 300);
+        updateRecordOverlay();
     }
 
     function startRecording(actionName) {
         recordingAction = actionName;
-        recordModifiers = { meta: false, ctrl: false, alt: false, shift: false };
-        recordKeys = new Set();
-        // Capture on window (fires before the document-level trigger handlers) so the keys/clicks the
-        // user presses while recording do NOT also fire the normal triggers.
-        window.addEventListener('keydown', recordKeydownHandler, true);
-        window.addEventListener('keyup', recordKeyupHandler, true);
-        window.addEventListener('click', recordClickHandler, true);
+        recordTerms     = [];
+        resetCurrentTerm();
+        // Capture on window (fires before the document-level trigger handlers) so
+        // keys/clicks the user presses while recording do NOT also fire normal triggers.
+        window.addEventListener('keydown',      recordKeydownHandler,      true);
+        window.addEventListener('keyup',        recordKeyupHandler,        true);
+        window.addEventListener('click',        recordClickHandler,        true);
+        window.addEventListener('contextmenu',  recordContextMenuHandler,  true);
         showRecordOverlay(actionName);
     }
 
     function stopRecording() {
-        window.removeEventListener('keydown', recordKeydownHandler, true);
-        window.removeEventListener('keyup', recordKeyupHandler, true);
-        window.removeEventListener('click', recordClickHandler, true);
+        clearRecordTimers();
+        window.removeEventListener('keydown',     recordKeydownHandler,     true);
+        window.removeEventListener('keyup',       recordKeyupHandler,       true);
+        window.removeEventListener('click',       recordClickHandler,       true);
+        window.removeEventListener('contextmenu', recordContextMenuHandler, true);
         recordingAction = null;
-        recordModifiers = null;
-        recordKeys = null;
+        recordTerms     = [];
+        resetCurrentTerm();
         hideRecordOverlay();
         refreshSettingsPanel();
     }
@@ -4416,9 +4599,10 @@
         log('Click event received');
         
         // Evaluate configurable click triggers (menu vs. buffer/auto-infer).
+        // Pass event.detail (click count: 1=single, 2=double) for multi-click binding support.
         const clickState = bindingState(event);
-        const menuClick = actionMatchesClick('menu', clickState);
-        const bufferClick = actionMatchesClick('inferBuffer', clickState);
+        const menuClick   = actionMatchesClick('menu',        clickState, event.detail || 1, false);
+        const bufferClick = actionMatchesClick('inferBuffer', clickState, event.detail || 1, false);
         log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
 
         if (!menuClick && !bufferClick) {
@@ -4542,7 +4726,7 @@
         log('Context menu (right-click) event received');
 
         const contextState = bindingState(event);
-        if (!actionMatchesClick('menu', contextState)) {
+        if (!actionMatchesClick('menu', contextState, event.detail || 1, true)) {
             log('No menu trigger matched on right-click, returning');
             logFunctionEnd('handleContextMenu');
             return;
@@ -4660,9 +4844,17 @@
         if (event.repeat) { return; } // ignore auto-repeat; fire once per press
         const justPressedKey = (event.key && event.key.length === 1) ? event.key.toLowerCase() : null;
         const keyState = bindingState(event);
-        const isMenuKey     = !!justPressedKey && keyboardActionTriggered('menu',         keyState, justPressedKey);
-        const isInferKey    = !!justPressedKey && keyboardActionTriggered('inferQuiet',   keyState, justPressedKey);
-        const isSettingsKey = !!justPressedKey && keyboardActionTriggered('openSettings', keyState, justPressedKey);
+        // Chord matching is evaluated once per keydown. chordActionResult() is stateful
+        // (it mutates chordProgress), so it must be called exactly once per action here.
+        const menuChordResult     = justPressedKey ? chordActionResult('menu',         keyState, justPressedKey) : null;
+        const inferChordResult    = justPressedKey ? chordActionResult('inferQuiet',   keyState, justPressedKey) : null;
+        const settingsChordResult = justPressedKey ? chordActionResult('openSettings', keyState, justPressedKey) : null;
+
+        const isMenuKey     = !!justPressedKey && (keyboardActionTriggered('menu',         keyState, justPressedKey) || menuChordResult === 'complete');
+        const isInferKey    = !!justPressedKey && (keyboardActionTriggered('inferQuiet',   keyState, justPressedKey) || inferChordResult === 'complete');
+        const isSettingsKey = !!justPressedKey && (keyboardActionTriggered('openSettings', keyState, justPressedKey) || settingsChordResult === 'complete');
+        // Consume intermediate chord terms so they don't fall through to other handlers.
+        const isChordAdvancing = menuChordResult === 'advance' || inferChordResult === 'advance' || settingsChordResult === 'advance';
 
         // Settings toggle: open panel if closed, close if already open.
         // Check document containment rather than just settingsPanelEl identity — the element
@@ -4679,6 +4871,15 @@
             } else {
                 openTriggerSettings();
             }
+            return;
+        }
+
+        // An intermediate chord term matched (not complete yet). Consume the event so it
+        // doesn't inadvertently trigger other shortcuts or page behaviour while the user
+        // is mid-chord.
+        if (isChordAdvancing) {
+            event.preventDefault();
+            event.stopPropagation();
             return;
         }
 
