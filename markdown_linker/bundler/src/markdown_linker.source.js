@@ -186,9 +186,10 @@
     // that are unbound in the YouTube player and in Firefox: V (menu), B (quiet copy), Z (buffer).
     const TRIGGERS_PREF_KEY = 'markdown_linker.triggers';
     const DEFAULT_TRIGGERS = {
-        menu: [{ modifiers: {}, keys: ['v'], requiresClick: false }],         // hover + V -> open menu
-        inferQuiet: [{ modifiers: {}, keys: ['b'], requiresClick: false }],   // hover + B -> copy one link
-        inferBuffer: [{ modifiers: {}, keys: ['z'], requiresClick: true }]    // hold Z + click… -> buffer list
+        menu:         [{ modifiers: {}, keys: ['v'], requiresClick: false }],  // hover + V -> open menu
+        inferQuiet:   [{ modifiers: {}, keys: ['b'], requiresClick: false }],  // hover + B -> copy one link
+        inferBuffer:  [{ modifiers: {}, keys: ['z'], requiresClick: true  }],  // hold Z + click… -> buffer list
+        openSettings: []                                                        // no default — user records their own
     };
     let triggers = cloneTriggers(DEFAULT_TRIGGERS);
     // ============================================================================
@@ -4085,9 +4086,10 @@
 
     // ---- Trigger settings panel + "record combo" UI ----
     const ACTION_LABELS = {
-        menu: 'Open menu',
-        inferQuiet: 'Quiet copy (no menu)',
-        inferBuffer: 'Buffer links (hold + click)'
+        menu:         'Open menu',
+        inferQuiet:   'Quiet copy (no menu)',
+        inferBuffer:  'Buffer links (hold + click)',
+        openSettings: 'Open settings'
     };
     let settingsPanelEl = null;
     let settingsBodyEl = null;
@@ -4658,8 +4660,27 @@
         if (event.repeat) { return; } // ignore auto-repeat; fire once per press
         const justPressedKey = (event.key && event.key.length === 1) ? event.key.toLowerCase() : null;
         const keyState = bindingState(event);
-        const isMenuKey = !!justPressedKey && keyboardActionTriggered('menu', keyState, justPressedKey);
-        const isInferKey = !!justPressedKey && keyboardActionTriggered('inferQuiet', keyState, justPressedKey);
+        const isMenuKey     = !!justPressedKey && keyboardActionTriggered('menu',         keyState, justPressedKey);
+        const isInferKey    = !!justPressedKey && keyboardActionTriggered('inferQuiet',   keyState, justPressedKey);
+        const isSettingsKey = !!justPressedKey && keyboardActionTriggered('openSettings', keyState, justPressedKey);
+
+        // Settings toggle: open panel if closed, close if already open.
+        // Check document containment rather than just settingsPanelEl identity — the element
+        // can be removed from the DOM externally (e.g. by a test harness or another script),
+        // leaving a stale reference that would prevent reopening.
+        if (isSettingsKey) {
+            if (isInEditableContext(event)) { return; }
+            event.preventDefault();
+            event.stopPropagation();
+            pressedKeys.clear();
+            const panelIsOpen = settingsPanelEl && document.body.contains(settingsPanelEl);
+            if (panelIsOpen) {
+                closeTriggerSettings();
+            } else {
+                openTriggerSettings();
+            }
+            return;
+        }
 
         if (isMenuKey || isInferKey) {
             logFunctionBegin('handleKeydown');

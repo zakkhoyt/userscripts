@@ -3819,8 +3819,10 @@ ${textLink}`;
       // hover + V -> open menu
       inferQuiet: [{ modifiers: {}, keys: ["b"], requiresClick: false }],
       // hover + B -> copy one link
-      inferBuffer: [{ modifiers: {}, keys: ["z"], requiresClick: true }]
+      inferBuffer: [{ modifiers: {}, keys: ["z"], requiresClick: true }],
       // hold Z + click… -> buffer list
+      openSettings: []
+      // no default — user records their own
     };
     let triggers = cloneTriggers(DEFAULT_TRIGGERS);
     function bufferLog(line) {
@@ -6514,7 +6516,8 @@ ${document.documentElement.outerHTML}`;
     const ACTION_LABELS = {
       menu: "Open menu",
       inferQuiet: "Quiet copy (no menu)",
-      inferBuffer: "Buffer links (hold + click)"
+      inferBuffer: "Buffer links (hold + click)",
+      openSettings: "Open settings"
     };
     let settingsPanelEl = null;
     let settingsBodyEl = null;
@@ -7017,6 +7020,22 @@ ${document.documentElement.outerHTML}`;
       const keyState = bindingState(event);
       const isMenuKey = !!justPressedKey && keyboardActionTriggered("menu", keyState, justPressedKey);
       const isInferKey = !!justPressedKey && keyboardActionTriggered("inferQuiet", keyState, justPressedKey);
+      const isSettingsKey = !!justPressedKey && keyboardActionTriggered("openSettings", keyState, justPressedKey);
+      if (isSettingsKey) {
+        if (isInEditableContext(event)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        pressedKeys.clear();
+        const panelIsOpen = settingsPanelEl && document.body.contains(settingsPanelEl);
+        if (panelIsOpen) {
+          closeTriggerSettings();
+        } else {
+          openTriggerSettings();
+        }
+        return;
+      }
       if (isMenuKey || isInferKey) {
         logFunctionBegin("handleKeydown");
         log(`Keyboard trigger detected (key=${justPressedKey}, menu=${isMenuKey}, inferQuiet=${isInferKey})`);
