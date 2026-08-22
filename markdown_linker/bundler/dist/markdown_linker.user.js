@@ -2,7 +2,7 @@
 // @name         Markdown Linker
 // @namespace    https://github.com/zakkhoyt/greasemonkey/markdown_linker
 // @version      1.0.0
-// @description  Convert URLs to markdown links with Alt+Click, Alt+Right-Click, Alt+M, or M key
+// @description  Convert URLs to markdown links — configurable key triggers (defaults: V=menu, B=quiet copy, hold Z+click=buffer)
 // @downloadURL  https://raw.githubusercontent.com/zakkhoyt/userscripts/zakk/markdown_linker_domains/markdown_linker/markdown_linker.user.js
 // @updateURL    https://raw.githubusercontent.com/zakkhoyt/userscripts/zakk/markdown_linker_domains/markdown_linker/markdown_linker.user.js
 // @author       Zakk Hoyt
@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_unregisterMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -430,14 +432,33 @@
         } catch (error) {
         }
         try {
-          const selectors = [
-            ".a-price .a-offscreen",
-            "#priceblock_ourprice",
-            "#priceblock_dealprice",
-            "#priceblock_saleprice",
-            ".a-price-whole"
-          ];
-          for (const selector of selectors) {
+          const offscreenElement = safeQuery(".a-price .a-offscreen", doc);
+          if (offscreenElement) {
+            const text = safeText(offscreenElement);
+            if (text && isValidPrice(text)) {
+              return text;
+            }
+          }
+        } catch (error) {
+        }
+        try {
+          const wholeElement = safeQuery(".a-price-whole", doc);
+          if (wholeElement) {
+            const whole = (safeText(wholeElement) || "").replace(/[^\d]/g, "");
+            if (whole) {
+              const scope = wholeElement.parentElement || doc;
+              const symbolRaw = safeText(safeQuery(".a-price-symbol", scope)) || "$";
+              const symbol = symbolRaw.replace(/\s/g, "") || "$";
+              const fractionElement = safeQuery(".a-price-fraction", scope);
+              const fraction = fractionElement ? (safeText(fractionElement) || "").replace(/[^\d]/g, "") : "";
+              return fraction ? `${symbol}${whole}.${fraction}` : `${symbol}${whole}`;
+            }
+          }
+        } catch (error) {
+        }
+        try {
+          const legacySelectors = ["#priceblock_ourprice", "#priceblock_dealprice", "#priceblock_saleprice"];
+          for (const selector of legacySelectors) {
             const element = safeQuery(selector, doc);
             if (element) {
               const text = safeText(element);
@@ -648,8 +669,12 @@
         const priceData = extractProductPriceData(doc);
         const imageData = extractProductImageData(doc);
         const variant = extractProductVariant(doc);
+        const variants = extractProductVariants(doc);
         const availability = extractProductAvailability(doc);
         const shipping = extractProductShipping(doc);
+        const delivery = extractProductDelivery(doc);
+        const store = extractProductStore(doc);
+        const locker = extractProductLocker(doc);
         const rating = extractProductRating(doc);
         const urlData = parseURLData(url, doc);
         const productData = {
@@ -661,8 +686,12 @@
           price: priceData,
           images: imageData,
           variant,
+          variants,
           availability,
           shipping,
+          delivery,
+          store,
+          locker,
           rating,
           url: urlData,
           metadata: {
@@ -672,6 +701,151 @@
           }
         };
         return productData;
+      }
+      function extractProductVariants(doc) {
+        const out = [];
+        try {
+          const spans = safeQueryAll('span[id^="inline-twister-expanded-dimension-text-"]', doc);
+          for (const span of spans) {
+            const id = span && span.id || "";
+            const match = id.match(/^inline-twister-expanded-dimension-text-(.+?)_name$/);
+            if (!match) continue;
+            const dimension = match[1];
+            const value = safeText(span);
+            if (dimension && value) {
+              out.push({ dimension, value });
+            }
+          }
+        } catch (error) {
+        }
+        return out;
+      }
+      function deliveryTimeToDays(text) {
+        if (!text || typeof text !== "string") {
+          return null;
+        }
+        const trimmed = text.trim();
+        if (/today/i.test(trimmed)) return 0;
+        if (/tomorrow/i.test(trimmed)) return 1;
+        if (/overnight/i.test(trimmed)) return 1;
+        if (/\b(?:one|next)[\s-]?day\b/i.test(trimmed)) return 1;
+        if (/\btwo[\s-]?day\b/i.test(trimmed)) return 2;
+        const match = trimmed.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i);
+        if (!match) {
+          return null;
+        }
+        const months = {
+          january: 0,
+          february: 1,
+          march: 2,
+          april: 3,
+          may: 4,
+          june: 5,
+          july: 6,
+          august: 7,
+          september: 8,
+          october: 9,
+          november: 10,
+          december: 11
+        };
+        const monthIdx = months[match[1].toLowerCase()];
+        const day = parseInt(match[2], 10);
+        if (monthIdx === void 0 || isNaN(day)) {
+          return null;
+        }
+        try {
+          const now = /* @__PURE__ */ new Date();
+          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          let target = new Date(now.getFullYear(), monthIdx, day);
+          if (target.getTime() < today.getTime()) {
+            target = new Date(now.getFullYear() + 1, monthIdx, day);
+          }
+          const days = Math.round((target.getTime() - today.getTime()) / 864e5);
+          return days >= 0 ? days : null;
+        } catch (error) {
+          return null;
+        }
+      }
+      function extractProductDelivery(doc) {
+        try {
+          const slot = safeQuery("#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE", doc);
+          if (!slot) {
+            return null;
+          }
+          const span = slot.querySelector("[data-csa-c-delivery-time]");
+          if (!span) {
+            return null;
+          }
+          const actual = safeAttr(span, "data-csa-c-delivery-time");
+          const price = safeAttr(span, "data-csa-c-delivery-price");
+          const type = safeAttr(span, "data-csa-c-delivery-type");
+          const program = safeAttr(span, "data-csa-c-delivery-benefit-program-id");
+          return {
+            actual: actual || null,
+            inDays: deliveryTimeToDays(actual),
+            price: price || null,
+            type: type || null,
+            program: program || null,
+            isPrime: (program || "").toLowerCase() === "prime"
+          };
+        } catch (error) {
+          return null;
+        }
+      }
+      function extractProductStore(doc) {
+        try {
+          const byline = safeQuery("a#bylineInfo", doc) || safeQuery("#bylineInfo a", doc) || safeQuery("#bylineInfo", doc);
+          if (!byline) {
+            return null;
+          }
+          const href = safeAttr(byline, "href");
+          if (!href) {
+            return null;
+          }
+          const name = safeText(byline);
+          let url = href;
+          let pathname = href;
+          try {
+            const parsed = new URL(href, "https://www.amazon.com");
+            url = parsed.toString();
+            pathname = parsed.pathname;
+          } catch (error) {
+          }
+          let kind = "store";
+          if (pathname.indexOf("/stores/") !== -1) {
+            kind = "store";
+          } else if (pathname === "/s" || pathname.indexOf("/s/") === 0) {
+            kind = "search";
+          }
+          return { kind, name: name || null, url };
+        } catch (error) {
+          return null;
+        }
+      }
+      function extractProductLocker(doc) {
+        try {
+          const result = { isLocker: false, name: null, location: null, cannotShipReason: null };
+          const lockerLink = safeQuery("#contextualIngressPtLink", doc);
+          const ariaLabel = lockerLink ? safeAttr(lockerLink, "aria-label") : null;
+          if (ariaLabel && /amazon locker/i.test(ariaLabel)) {
+            result.isLocker = true;
+            const parts = ariaLabel.split(" - ");
+            if (parts.length >= 3) {
+              result.name = parts[1].trim();
+              result.location = parts.slice(2).join(" - ").trim();
+            }
+          }
+          const errorSpan = safeQuery("#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE span.a-color-error", doc);
+          if (errorSpan) {
+            result.cannotShipReason = safeText(errorSpan);
+          }
+          if (!result.isLocker && !result.cannotShipReason) {
+            return null;
+          }
+          return result;
+        } catch (error) {
+          return null;
+        }
       }
       function extractProductPriceData(doc) {
         const currentPrice = extractProductPrice(doc);
@@ -816,11 +990,11 @@
           let reviewCount = null;
           const countElement = safeQuery('[data-hook="total-review-count"]', doc) || safeQuery("#acrCustomerReviewText", doc);
           if (countElement) {
-            const countText = safeText(countElement);
+            const countText = safeAttr(countElement, "aria-label") || safeText(countElement);
             if (countText) {
-              const countMatch = countText.match(/([\d,]+)\s*ratings?/i);
+              const countMatch = countText.match(/([\d,]+)/);
               if (countMatch) {
-                reviewCount = parseInt(countMatch[1].replace(/,/g, ""));
+                reviewCount = parseInt(countMatch[1].replace(/,/g, ""), 10);
               }
             }
           }
@@ -888,56 +1062,106 @@
         }
         return null;
       }
+      function getSharedExtractor() {
+        if (typeof window !== "undefined" && window.__AmazonToolkitModules) {
+          return window.__AmazonToolkitModules["extractors/shared_extractor"] || {};
+        }
+        try {
+          return require_shared_extractor();
+        } catch (error) {
+          return {};
+        }
+      }
       function extractProductASIN(doc, url) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductASIN === "function" ? shared.extractProductASIN(doc, url) : null;
       }
       function extractProductTitle(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductTitle === "function" ? shared.extractProductTitle(doc) : null;
       }
       function cleanProductTitle(title) {
-        return title;
+        const shared = getSharedExtractor();
+        return typeof shared.cleanProductTitle === "function" ? shared.cleanProductTitle(title) : title;
       }
       function extractProductBrand(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductBrand === "function" ? shared.extractProductBrand(doc) : null;
       }
       function extractProductDescription(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductDescription === "function" ? shared.extractProductDescription(doc) : null;
       }
       function extractProductPrice(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductPrice === "function" ? shared.extractProductPrice(doc) : null;
       }
       function extractProductImageURL(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductImageURL === "function" ? shared.extractProductImageURL(doc) : null;
       }
       function extractProductVariant(doc) {
-        return null;
+        const shared = getSharedExtractor();
+        return typeof shared.extractProductVariant === "function" ? shared.extractProductVariant(doc) : null;
       }
-      function safeQuery(selector, context) {
-        return null;
+      function safeQuery(selector, context = typeof document !== "undefined" ? document : null) {
+        try {
+          return context ? context.querySelector(selector) : null;
+        } catch (error) {
+          return null;
+        }
       }
-      function safeQueryAll(selector, context) {
-        return [];
+      function safeQueryAll(selector, context = typeof document !== "undefined" ? document : null) {
+        try {
+          return context ? Array.from(context.querySelectorAll(selector)) : [];
+        } catch (error) {
+          return [];
+        }
       }
       function safeText(element) {
-        return null;
+        if (!element) return null;
+        const text = element.textContent || "";
+        return text.trim() || null;
       }
       function safeAttr(element, attr) {
-        return null;
+        if (!element) return null;
+        const value = element.getAttribute(attr);
+        return value ? value.trim() : null;
       }
-      function isAmazonImageURL(url) {
-        return false;
+      function isAmazonImageURL(value) {
+        if (!value || typeof value !== "string") return false;
+        try {
+          const url = new URL(value);
+          const imageHosts = ["m.media-amazon.com", "images-na.ssl-images-amazon.com", "images-amazon.com", "ecx.images-amazon.com"];
+          return imageHosts.some((host) => url.hostname === host || url.hostname.endsWith("." + host));
+        } catch (error) {
+          return false;
+        }
       }
       function logWarn(...args) {
+        try {
+          console.warn("[amazon_toolkit/product]", ...args);
+        } catch (error) {
+        }
       }
       function logError(...args) {
+        try {
+          console.error("[amazon_toolkit/product]", ...args);
+        } catch (error) {
+        }
       }
       var ProductExtractor = {
         extractProductData,
         extractProductPriceData,
         extractProductImageData,
         extractProductImageID,
+        extractProductVariants,
         extractProductAvailability,
         extractProductShipping,
+        extractProductDelivery,
+        deliveryTimeToDays,
+        extractProductStore,
+        extractProductLocker,
         extractProductRating,
         parseProductPriceValue,
         extractProductCurrency,
@@ -3389,6 +3613,137 @@ ${textLink}`;
     }
   });
 
+  // ../../common/source_capture/source_capture.js
+  var require_source_capture = __commonJS({
+    "../../common/source_capture/source_capture.js"(exports, module) {
+      "use strict";
+      var DEFAULT_HOST = "127.0.0.1";
+      var DEFAULT_PORT = 8787;
+      var DEFAULT_TOKEN = "source-capture-dev";
+      var DEFAULT_TIMEOUT_MS = 8e3;
+      function createLogBuffer(maxLines = 5e3) {
+        const lines = [];
+        return {
+          push(line) {
+            lines.push(typeof line === "string" ? line : String(line));
+            if (lines.length > maxLines) {
+              lines.splice(0, lines.length - maxLines);
+            }
+          },
+          getText() {
+            return lines.join("\n");
+          },
+          clear() {
+            lines.length = 0;
+          },
+          size() {
+            return lines.length;
+          }
+        };
+      }
+      function resolveGmXhr() {
+        if (typeof GM_xmlhttpRequest === "function") {
+          return GM_xmlhttpRequest;
+        }
+        if (typeof GM !== "undefined" && GM && typeof GM.xmlHttpRequest === "function") {
+          return GM.xmlHttpRequest.bind(GM);
+        }
+        return null;
+      }
+      function postFile(opts) {
+        return new Promise((resolve) => {
+          const xhr = resolveGmXhr();
+          if (!xhr) {
+            resolve({ ok: false, path: opts.path, error: "GM_xmlhttpRequest unavailable (missing @grant?)" });
+            return;
+          }
+          const url = `http://${opts.host}:${opts.port}/save`;
+          try {
+            xhr({
+              method: "POST",
+              url,
+              headers: {
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Capture-Token": opts.token,
+                "X-Capture-Userscript": opts.userscript,
+                "X-Capture-Path": opts.path
+              },
+              data: opts.content,
+              timeout: DEFAULT_TIMEOUT_MS,
+              onload: (response) => {
+                const status = response && typeof response.status === "number" ? response.status : 0;
+                resolve({
+                  ok: status >= 200 && status < 300,
+                  path: opts.path,
+                  status,
+                  response: response ? response.responseText : ""
+                });
+              },
+              onerror: () => resolve({ ok: false, path: opts.path, error: "network error (server not running?)" }),
+              ontimeout: () => resolve({ ok: false, path: opts.path, error: "timeout" })
+            });
+          } catch (error) {
+            resolve({ ok: false, path: opts.path, error: String(error) });
+          }
+        });
+      }
+      function capture(options) {
+        const opts = options || {};
+        const host = opts.host || DEFAULT_HOST;
+        const port = opts.port || DEFAULT_PORT;
+        const token = opts.token || DEFAULT_TOKEN;
+        const userscript = opts.userscript;
+        const files = Array.isArray(opts.files) ? opts.files.filter((file) => file && file.path) : [];
+        if (!userscript || files.length === 0) {
+          const result = { ok: false, results: [], error: "capture requires { userscript, files: [{path, content}] }" };
+          if (typeof opts.onResult === "function") {
+            try {
+              opts.onResult(result);
+            } catch (error) {
+            }
+          }
+          return Promise.resolve(result);
+        }
+        const requests = files.map((file) => postFile({
+          host,
+          port,
+          token,
+          userscript,
+          path: file.path,
+          content: file.content == null ? "" : String(file.content)
+        }));
+        return Promise.all(requests).then((results) => {
+          const ok = results.length > 0 && results.every((entry) => entry.ok);
+          const result = { ok, results };
+          if (typeof opts.onResult === "function") {
+            try {
+              opts.onResult(result);
+            } catch (error) {
+            }
+          }
+          return result;
+        });
+      }
+      var SourceCapture = {
+        version: "0.1.0",
+        DEFAULT_HOST,
+        DEFAULT_PORT,
+        DEFAULT_TOKEN,
+        capture,
+        postFile,
+        createLogBuffer,
+        // Shared buffer instance for the common "pipe my logs through this" case.
+        logBuffer: createLogBuffer()
+      };
+      if (typeof module !== "undefined" && module.exports) {
+        module.exports = SourceCapture;
+      }
+      if (typeof window !== "undefined") {
+        window.SourceCapture = SourceCapture;
+      }
+    }
+  });
+
   // src/userscript.entry.js
   var import_validation_helpers = __toESM(require_validation_helpers(), 1);
   var import_shared_extractor = __toESM(require_shared_extractor(), 1);
@@ -3401,14 +3756,16 @@ ${textLink}`;
   var import_markdown_generator = __toESM(require_markdown_generator(), 1);
   var import_lib = __toESM(require_amazon_toolkit(), 1);
   var import_lib_youtube = __toESM(require_youtube_toolkit(), 1);
+  var import_source_capture = __toESM(require_source_capture(), 1);
 
   // src/markdown_linker.source.js
   console.log(`markdown_linker: 01`);
   (function() {
     "use strict";
     console.log(`markdown_linker: 11`);
-    const isDebug = true;
+    let isDebug = false;
     let logBase = "markdown_linker";
+    let activeNotification = null;
     let currentMenu = null;
     let targetElement = null;
     let targetUrl = null;
@@ -3440,6 +3797,7 @@ ${textLink}`;
       lastNonEmptySelection = text;
       lastSelectionTimestamp = Date.now();
     });
+    const IS_DEBUG_PREF_KEY = "markdown_linker.is_debug";
     const ALT_Z_TITLE_PREF_KEY = "markdown_linker.altz_title_source";
     const ALT_Z_TITLE_OPTIONS = [
       { id: "url-forward", label: "URL (forward)" },
@@ -3448,26 +3806,68 @@ ${textLink}`;
       { id: "page", label: "Page title" }
     ];
     let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
-    let altZMenuCommandId = null;
+    const CAPTURE_MODE_PREF_KEY = "markdown_linker.capture_mode";
+    const CAPTURE_MODE_OPTIONS = [
+      { id: "none", label: "none" },
+      { id: "html_logs", label: "html & logs" }
+    ];
+    let captureMode = CAPTURE_MODE_OPTIONS[0].id;
+    let captureMenuCommandId = null;
+    const CHORD_RECORD_TIMEOUT_MS = 500;
+    const CHORD_PLAYBACK_TIMEOUT_MS = 1500;
+    const DEBUG_EVENT_DISPLAY_MS = 1500;
+    const DEBUG_EVENT_FADEOUT_MS = 300;
+    const TRIGGERS_PREF_KEY = "markdown_linker.triggers";
+    const DEFAULT_TRIGGERS = {
+      menu: [{ modifiers: {}, keys: ["v"], requiresClick: false }],
+      // hover + V -> open menu
+      inferQuiet: [{ modifiers: {}, keys: ["b"], requiresClick: false }],
+      // hover + B -> copy one link
+      inferBuffer: [{ modifiers: {}, keys: ["z"], requiresClick: true }],
+      // hold Z + click… -> buffer list
+      openSettings: [],
+      // no default — user records their own
+      toggleDebugPanel: []
+      // no default — user records their own
+    };
+    let triggers = cloneTriggers(DEFAULT_TRIGGERS);
+    function bufferLog(line) {
+      try {
+        if (typeof window !== "undefined" && window.SourceCapture && window.SourceCapture.logBuffer) {
+          window.SourceCapture.logBuffer.push(`${(/* @__PURE__ */ new Date()).toISOString()} ${line}`);
+        }
+      } catch (error) {
+      }
+    }
     function log(message) {
+      const line = `${logBase}: ${message}`;
+      bufferLog(line);
       if (isDebug) {
-        console.log(`${logBase}: ${message}`);
+        console.log(line);
       }
     }
     function logWarn(message) {
-      console.warn(`${logBase}: ${message}`);
+      const line = `${logBase}: ${message}`;
+      bufferLog(`WARN ${line}`);
+      console.warn(line);
     }
     function logError(message) {
-      console.error(`${logBase}: ${message}`);
+      const line = `${logBase}: ${message}`;
+      bufferLog(`ERROR ${line}`);
+      console.error(line);
     }
     function logFunctionBegin(functionName) {
+      const line = `${logBase}: begin ${functionName}`;
+      bufferLog(line);
       if (isDebug) {
-        console.log(`${logBase}: begin ${functionName}`);
+        console.log(line);
       }
     }
     function logFunctionEnd(functionName) {
+      const line = `${logBase}: end ${functionName}`;
+      bufferLog(line);
       if (isDebug) {
-        console.log(`${logBase}: end ${functionName}`);
+        console.log(line);
       }
     }
     function unwrap(obj, prop) {
@@ -3483,14 +3883,14 @@ ${textLink}`;
         try {
           storedValue = GM_getValue(ALT_Z_TITLE_PREF_KEY, storedValue);
         } catch (error) {
-          logWarn(`Failed to load Alt+Z preference: ${error}`);
+          logWarn(`Failed to load quick-copy title preference: ${error}`);
         }
       }
       if (!ALT_Z_TITLE_OPTIONS.some((option) => option.id === storedValue)) {
-        logWarn(`Alt+Z preference "${storedValue}" invalid, reverting to default`);
+        logWarn(`Quick-copy title preference "${storedValue}" invalid, reverting to default`);
         storedValue = ALT_Z_TITLE_OPTIONS[0].id;
       }
-      log(`Loaded Alt+Z title preference: ${storedValue}`);
+      log(`Loaded quick-copy title preference: ${storedValue}`);
       logFunctionEnd("loadAltZTitlePreference");
       return storedValue;
     }
@@ -3500,50 +3900,140 @@ ${textLink}`;
         try {
           GM_setValue(ALT_Z_TITLE_PREF_KEY, altZTitlePreference);
         } catch (error) {
-          logWarn(`Failed to persist Alt+Z preference: ${error}`);
+          logWarn(`Failed to persist quick-copy title preference: ${error}`);
         }
       }
-      registerAltZTitleMenuCommand();
+      refreshSettingsPanel();
       logFunctionEnd("persistAltZTitlePreference");
-    }
-    function registerAltZTitleMenuCommand() {
-      logFunctionBegin("registerAltZTitleMenuCommand");
-      if (typeof GM_registerMenuCommand !== "function") {
-        log("GM_registerMenuCommand unavailable, skipping menu registration");
-        logFunctionEnd("registerAltZTitleMenuCommand");
-        return;
-      }
-      if (altZMenuCommandId && typeof GM_unregisterMenuCommand === "function") {
-        try {
-          GM_unregisterMenuCommand(altZMenuCommandId);
-        } catch (error) {
-          logWarn(`Failed to unregister previous menu command: ${error}`);
-        }
-      }
-      const optionLabel = getAltZOption(altZTitlePreference).label;
-      const menuLabel = `Alt+Z title: ${optionLabel} (click to cycle)`;
-      altZMenuCommandId = GM_registerMenuCommand(menuLabel, cycleAltZTitlePreference);
-      logFunctionEnd("registerAltZTitleMenuCommand");
     }
     function cycleAltZTitlePreference() {
       logFunctionBegin("cycleAltZTitlePreference");
       const currentIndex = ALT_Z_TITLE_OPTIONS.findIndex((option) => option.id === altZTitlePreference);
       const nextIndex = (currentIndex + 1) % ALT_Z_TITLE_OPTIONS.length;
       altZTitlePreference = ALT_Z_TITLE_OPTIONS[nextIndex].id;
-      log(`Alt+Z preference changed to: ${altZTitlePreference}`);
+      log(`Quick-copy title preference changed to: ${altZTitlePreference}`);
       persistAltZTitlePreference();
       const optionLabel = getAltZOption(altZTitlePreference).label;
-      showNotification(`Alt+Z title source: ${optionLabel}`);
+      showNotification(`Quick-copy title: ${optionLabel}`);
       logFunctionEnd("cycleAltZTitlePreference");
     }
     function initializeAltZPreference() {
       logFunctionBegin("initializeAltZPreference");
       altZTitlePreference = loadAltZTitlePreference();
-      registerAltZTitleMenuCommand();
       logFunctionEnd("initializeAltZPreference");
     }
+    function loadIsDebug() {
+      logFunctionBegin("loadIsDebug");
+      let stored = false;
+      if (typeof GM_getValue === "function") {
+        try {
+          stored = GM_getValue(IS_DEBUG_PREF_KEY, false);
+        } catch (error) {
+        }
+      }
+      const value = stored === true || stored === "true";
+      logFunctionEnd("loadIsDebug");
+      return value;
+    }
+    function persistIsDebug() {
+      logFunctionBegin("persistIsDebug");
+      if (typeof GM_setValue === "function") {
+        try {
+          GM_setValue(IS_DEBUG_PREF_KEY, isDebug);
+        } catch (error) {
+          logWarn(`Failed to persist debug mode: ${error}`);
+        }
+      }
+      refreshSettingsPanel();
+      logFunctionEnd("persistIsDebug");
+    }
+    function toggleIsDebug() {
+      logFunctionBegin("toggleIsDebug");
+      isDebug = !isDebug;
+      log(`Debug mode changed to: ${isDebug}`);
+      persistIsDebug();
+      showNotification(`Debug mode: ${isDebug ? "on" : "off"}`);
+      logFunctionEnd("toggleIsDebug");
+    }
+    function initializeIsDebug() {
+      logFunctionBegin("initializeIsDebug");
+      isDebug = loadIsDebug();
+      logFunctionEnd("initializeIsDebug");
+    }
+    function getCaptureOption(optionId) {
+      return CAPTURE_MODE_OPTIONS.find((option) => option.id === optionId) || CAPTURE_MODE_OPTIONS[0];
+    }
+    function loadCaptureMode() {
+      logFunctionBegin("loadCaptureMode");
+      let storedValue = CAPTURE_MODE_OPTIONS[0].id;
+      if (typeof GM_getValue === "function") {
+        try {
+          storedValue = GM_getValue(CAPTURE_MODE_PREF_KEY, storedValue);
+        } catch (error) {
+          logWarn(`Failed to load capture mode: ${error}`);
+        }
+      }
+      if (!CAPTURE_MODE_OPTIONS.some((option) => option.id === storedValue)) {
+        logWarn(`Capture mode "${storedValue}" invalid, reverting to default`);
+        storedValue = CAPTURE_MODE_OPTIONS[0].id;
+      }
+      log(`Loaded capture mode: ${storedValue}`);
+      logFunctionEnd("loadCaptureMode");
+      return storedValue;
+    }
+    function persistCaptureMode() {
+      logFunctionBegin("persistCaptureMode");
+      if (typeof GM_setValue === "function") {
+        try {
+          GM_setValue(CAPTURE_MODE_PREF_KEY, captureMode);
+        } catch (error) {
+          logWarn(`Failed to persist capture mode: ${error}`);
+        }
+      }
+      registerCaptureModeMenuCommand();
+      logFunctionEnd("persistCaptureMode");
+    }
+    function registerCaptureModeMenuCommand() {
+      logFunctionBegin("registerCaptureModeMenuCommand");
+      if (typeof GM_registerMenuCommand !== "function") {
+        log("GM_registerMenuCommand unavailable, skipping capture menu registration");
+        logFunctionEnd("registerCaptureModeMenuCommand");
+        return;
+      }
+      if (captureMenuCommandId && typeof GM_unregisterMenuCommand === "function") {
+        try {
+          GM_unregisterMenuCommand(captureMenuCommandId);
+        } catch (error) {
+          logWarn(`Failed to unregister previous capture menu command: ${error}`);
+        }
+      }
+      const optionLabel = getCaptureOption(captureMode).label;
+      const menuLabel = `Capture: ${optionLabel} (click to cycle)`;
+      captureMenuCommandId = GM_registerMenuCommand(menuLabel, cycleCaptureMode);
+      logFunctionEnd("registerCaptureModeMenuCommand");
+    }
+    function cycleCaptureMode() {
+      logFunctionBegin("cycleCaptureMode");
+      const currentIndex = CAPTURE_MODE_OPTIONS.findIndex((option) => option.id === captureMode);
+      const nextIndex = (currentIndex + 1) % CAPTURE_MODE_OPTIONS.length;
+      captureMode = CAPTURE_MODE_OPTIONS[nextIndex].id;
+      log(`Capture mode changed to: ${captureMode}`);
+      persistCaptureMode();
+      showNotification(`Capture: ${getCaptureOption(captureMode).label}`);
+      logFunctionEnd("cycleCaptureMode");
+    }
+    function initializeCaptureMode() {
+      logFunctionBegin("initializeCaptureMode");
+      captureMode = loadCaptureMode();
+      registerCaptureModeMenuCommand();
+      logFunctionEnd("initializeCaptureMode");
+    }
     log("begin script");
+    initializeIsDebug();
     initializeAltZPreference();
+    initializeCaptureMode();
+    triggers = loadTriggers();
+    registerSettingsMenuCommand();
     let youtubeContextCacheKey = null;
     let youtubeContextCacheValue = null;
     function getYouTubeToolkit() {
@@ -3989,6 +4479,7 @@ ${textLink}`;
       const option = {
         label: "Timestamp",
         displayValue: decoratedTitle,
+        tooltip: "Link to the video at the current playback position.",
         getResult: () => ({
           title: decoratedTitle,
           url: timestampUrl
@@ -4052,6 +4543,7 @@ ${textLink}`;
           options.push({
             label: "Video Title",
             displayValue: videoTitle,
+            tooltip: "Title from YouTube video metadata.",
             getResult: () => ({
               title: videoTitle,
               url: capturedUrl
@@ -4072,6 +4564,7 @@ ${textLink}`;
           options.push({
             label: "Playlist Markdown",
             displayValue: `${context.playlist.videos.length} entries`,
+            tooltip: "All playlist entries as a flat markdown bullet list.",
             getValue: () => playlistMarkdown,
             isAllLinks: true
           });
@@ -4081,6 +4574,7 @@ ${textLink}`;
         options.push({
           label: "Playlist Link",
           displayValue: playlistTitle,
+          tooltip: "Link to the YouTube playlist.",
           getResult: () => ({
             title: context.playlist.title ? `YouTube Playlist: ${context.playlist.title}` : "YouTube Playlist",
             url: context.playlist.url || capturedUrl
@@ -4092,6 +4586,7 @@ ${textLink}`;
         options.push({
           label: "Channel Link",
           displayValue: context.channel.title,
+          tooltip: "Link to the YouTube channel page.",
           getResult: () => ({
             title: `YouTube Channel: ${context.channel.title}`,
             url: context.channel.canonicalUrl || capturedUrl
@@ -4598,7 +5093,10 @@ Open debugger to inspect?`;
         logFunctionEnd("handleSelectionAutoCopy");
         return false;
       }
-      copyToClipboard(markdown, selectedText, sanitizedUrl);
+      copyToClipboard(markdown, selectedText, sanitizedUrl, {
+        originalUrl: typeof window !== "undefined" && window.location && window.location.href || sanitizedUrl,
+        format: "selection"
+      });
       showNotification("Selection copied to clipboard");
       clearSelectionCache("selection auto copied");
       logFunctionEnd("handleSelectionAutoCopy");
@@ -4983,6 +5481,14 @@ Open debugger to inspect?`;
         if (resolvedUrl !== item.url) {
           log(`Sanitized buffered URL: "${resolvedUrl}"`);
         }
+        if (shouldEmitAmazonProductBlock(resolvedUrl, !item.anchor)) {
+          const amazonData = getAmazonProductData(resolvedUrl);
+          const amazonBlock = amazonData ? buildAmazonProductMarkdown(amazonData, resolvedUrl) : null;
+          if (amazonBlock) {
+            log("Buffered item is an Amazon product on the current page; using details block");
+            return amazonBlock;
+          }
+        }
         const titleSourceUrl = item.url || resolvedUrl;
         const title = getAutoInferredTitle(item.anchor, titleSourceUrl);
         if (!title) {
@@ -5006,6 +5512,13 @@ Open debugger to inspect?`;
           log("Did copy to clipboard");
           showNotification(`Copied link to clipboard`);
           log(`Did show notification for 1 link`);
+          const captureItem = buffer[0];
+          const captureResolvedUrl = cleanUrl(captureItem.url) || captureItem.url;
+          maybeCaptureSources({
+            originalUrl: captureItem.anchor && captureItem.anchor.href ? captureItem.anchor.href : captureItem.url,
+            format: shouldEmitAmazonProductBlock(captureResolvedUrl, !captureItem.anchor) ? "amazon product" : getAltZOption(altZTitlePreference).label.toLowerCase(),
+            output: fullMarkdown
+          });
         } catch (error) {
           logError(`Failed to copy to clipboard: ${error}`);
           showNotification(`Failed to copy link - check console for errors`);
@@ -5025,6 +5538,11 @@ Open debugger to inspect?`;
           log("Did copy to clipboard");
           showNotification(`Copied ${buffer.length} links to clipboard`);
           log(`Did show notification for ${buffer.length} links`);
+          maybeCaptureSources({
+            originalUrl: typeof window !== "undefined" && window.location && window.location.href || "",
+            format: `${getAltZOption(altZTitlePreference).label.toLowerCase()} (x${buffer.length})`,
+            output: fullMarkdown
+          });
         } catch (error) {
           logError(`Failed to copy to clipboard: ${error}`);
           showNotification(`Failed to copy ${buffer.length} links - check console for errors`);
@@ -5042,7 +5560,7 @@ Open debugger to inspect?`;
       logFunctionEnd("createMarkdown");
       return markdown;
     }
-    function copyToClipboard(markdown, title, url) {
+    function copyToClipboard(markdown, title, url, captureContext) {
       logFunctionBegin("copyToClipboard");
       log(`Will copy to clipboard: "${markdown}"`);
       try {
@@ -5054,6 +5572,12 @@ Open debugger to inspect?`;
         log("Will show notification");
         showNotification("Markdown link copied to clipboard!");
         log("Did show notification");
+        const captureCtx = captureContext || {};
+        maybeCaptureSources({
+          originalUrl: captureCtx.originalUrl || url,
+          format: captureCtx.format || "link",
+          output: markdown
+        });
       } catch (error) {
         log(`ERROR: Failed to copy to clipboard: ${error}`);
         console.error(`${logBase}: Failed to copy to clipboard:`, error);
@@ -5119,9 +5643,10 @@ Open debugger to inspect?`;
       log(`Will create notification with message: "${message}"`);
       const notification = document.createElement("div");
       notification.textContent = message;
+      const debugPanelHeight = isDebugPanelVisible && debugPanelEl ? debugPanelEl.offsetHeight : 0;
+      const notifTop = 20 + (debugPanelHeight > 0 ? debugPanelHeight + 8 : 0);
       notification.style.cssText = `
             position: fixed;
-            top: 20px;
             right: 20px;
             background: #4CAF50;
             color: white;
@@ -5131,18 +5656,115 @@ Open debugger to inspect?`;
             z-index: 999999;
             font-family: sans-serif;
             font-size: 14px;
+            white-space: pre-line;
             animation: mdLinkerFadeIn 0.3s, mdLinkerFadeOut 0.3s 2.7s;
         `;
+      notification.style.top = notifTop + "px";
       log("Will append notification to body");
       document.body.appendChild(notification);
+      activeNotification = notification;
       log("Did append notification to body");
       log("Will schedule notification removal in 3000ms");
       setTimeout(() => {
         log("Will remove notification");
         notification.remove();
+        if (activeNotification === notification) {
+          activeNotification = null;
+        }
         log("Did remove notification");
       }, 3e3);
       logFunctionEnd("showNotification");
+    }
+    function appendNotificationLine(text) {
+      try {
+        if (activeNotification && activeNotification.isConnected) {
+          activeNotification.textContent = `${activeNotification.textContent}
+${text}`;
+        } else {
+          showNotification(text);
+        }
+      } catch (error) {
+      }
+    }
+    function buildCaptureSlug(url) {
+      try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.replace(/[^A-Za-z0-9.-]/g, "_");
+        const path = parsed.pathname.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "index";
+        return `${host}_${path}`.slice(0, 120);
+      } catch (error) {
+        return "page";
+      }
+    }
+    function captureTimestamp() {
+      const now = /* @__PURE__ */ new Date();
+      const pad = (value) => String(value).padStart(2, "0");
+      return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    }
+    function maybeCaptureSources(context) {
+      if (captureMode !== "html_logs") {
+        return;
+      }
+      logFunctionBegin("maybeCaptureSources");
+      const sourceCapture = typeof window !== "undefined" && window.SourceCapture ? window.SourceCapture : null;
+      if (!sourceCapture || typeof sourceCapture.capture !== "function") {
+        log("SourceCapture unavailable, skipping capture");
+        logFunctionEnd("maybeCaptureSources");
+        return;
+      }
+      const ctx = context || {};
+      const pageUrl = typeof window !== "undefined" && window.location && window.location.href || "";
+      const originalUrl = ctx.originalUrl || pageUrl;
+      const format = ctx.format || "";
+      const output = ctx.output || "";
+      let asin = null;
+      const toolkit = getAmazonToolkit();
+      if (toolkit && toolkit.Extractors && typeof toolkit.Extractors.extractProductASIN === "function") {
+        try {
+          asin = toolkit.Extractors.extractProductASIN(document, pageUrl);
+        } catch (error) {
+        }
+      }
+      let pageType;
+      let baseName;
+      if (asin) {
+        pageType = "products";
+        baseName = asin;
+      } else {
+        pageType = "other";
+        baseName = buildCaptureSlug(pageUrl);
+      }
+      const timestamp = captureTimestamp();
+      const htmlPath = `sources/${pageType}/${baseName}_${timestamp}.html`;
+      const logsPath = `logs/${baseName}_${timestamp}.log`;
+      const commentBody = `* original_url: ${originalUrl}
+* format: ${format}
+
+${output}`.replace(/-->/g, "-- >");
+      const html = `<!--
+${commentBody}
+-->
+<!DOCTYPE html>
+${document.documentElement.outerHTML}`;
+      const logs = sourceCapture.logBuffer ? sourceCapture.logBuffer.getText() : "";
+      log(`Will capture page source + logs -> ${htmlPath}, ${logsPath}`);
+      sourceCapture.capture({
+        userscript: "markdown_linker",
+        files: [
+          { path: htmlPath, content: html },
+          { path: logsPath, content: logs }
+        ],
+        onResult: (result) => {
+          if (result && result.ok) {
+            log(`Capture saved: ${htmlPath} + ${logsPath}`);
+            appendNotificationLine("Saved page source + logs to disk");
+          } else {
+            const firstError = result && result.results && result.results[0] && result.results[0].error ? result.results[0].error : "unknown";
+            log(`Capture not saved (server unavailable?): ${firstError}`);
+          }
+        }
+      });
+      logFunctionEnd("maybeCaptureSources");
     }
     log("Will add CSS keyframe animations");
     const style = document.createElement("style");
@@ -5201,11 +5823,169 @@ Open debugger to inspect?`;
       }, 600);
       logFunctionEnd("showClickFeedback");
     }
-    function createMenu(x, y, isAnchor, anchor = null) {
+    function isAmazonProductUrl(url) {
+      if (!url) return false;
+      const toolkit = getAmazonToolkit();
+      const fn = toolkit && toolkit.Helpers ? toolkit.Helpers.isAmazonProductURL : null;
+      if (typeof fn === "function") {
+        try {
+          return !!fn(url);
+        } catch (error) {
+        }
+      }
+      return /amazon\.[a-z.]+\/(?:[^/]+\/)?(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(url);
+    }
+    function amazonAsinMatchesCurrentPage(url) {
+      const toolkit = getAmazonToolkit();
+      const extractors = toolkit && toolkit.Extractors;
+      if (!extractors || typeof extractors.extractProductASIN !== "function") {
+        return false;
+      }
+      const pageUrl = typeof window !== "undefined" && window.location && window.location.href || "";
+      let targetAsin = null;
+      let pageAsin = null;
+      try {
+        targetAsin = extractors.extractProductASIN(document, url);
+      } catch (error) {
+      }
+      try {
+        pageAsin = extractors.extractProductASIN(document, pageUrl);
+      } catch (error) {
+      }
+      return !!targetAsin && targetAsin === pageAsin;
+    }
+    function shouldEmitAmazonProductBlock(url, isPageAction) {
+      if (!url || !isAmazonProductUrl(url)) {
+        return false;
+      }
+      if (isPageAction) {
+        return true;
+      }
+      return amazonAsinMatchesCurrentPage(url);
+    }
+    let amazonProductCacheKey = null;
+    let amazonProductCacheValue = null;
+    function getAmazonProductData(url) {
+      logFunctionBegin("getAmazonProductData");
+      if (!url) {
+        logFunctionEnd("getAmazonProductData");
+        return null;
+      }
+      if (amazonProductCacheKey === url && amazonProductCacheValue) {
+        log("Using cached Amazon product data");
+        logFunctionEnd("getAmazonProductData");
+        return amazonProductCacheValue;
+      }
+      const toolkit = getAmazonToolkit();
+      const extractFn = toolkit && toolkit.Extractors ? toolkit.Extractors.extractProductData : null;
+      if (typeof extractFn !== "function") {
+        log("Amazon toolkit extractProductData unavailable, skipping product details");
+        logFunctionEnd("getAmazonProductData");
+        return null;
+      }
+      let data = null;
+      try {
+        data = extractFn(document, url);
+      } catch (error) {
+        logError(`Amazon product extraction failed: ${error}`);
+      }
+      if (data) {
+        amazonProductCacheKey = url;
+        amazonProductCacheValue = data;
+        log("Extracted Amazon product data");
+      } else {
+        log("Amazon product extraction returned no data");
+      }
+      logFunctionEnd("getAmazonProductData");
+      return data;
+    }
+    function buildAmazonProductMarkdown(productData, cleanedUrl) {
+      logFunctionBegin("buildAmazonProductMarkdown");
+      if (!productData) {
+        logFunctionEnd("buildAmazonProductMarkdown");
+        return null;
+      }
+      const title = productData.titleCleaned || productData.title || "Amazon Product";
+      const url = cleanedUrl || productData.url && (productData.url.originalClean || productData.url.original) || "";
+      const lines = [`* [${title}](${url})`];
+      if (productData.price && productData.price.current) {
+        lines.push(`  * price: ${productData.price.current}`);
+      }
+      if (productData.delivery && Number.isFinite(productData.delivery.inDays)) {
+        lines.push(`  * delivers: ${productData.delivery.inDays}d`);
+      }
+      if (productData.rating && productData.rating.value != null) {
+        const count = productData.rating.count != null ? ` / ${productData.rating.count}` : "";
+        lines.push(`  * rating: ${productData.rating.value}${count}`);
+      }
+      if (Array.isArray(productData.variants)) {
+        const dimensionPriority = { color: 0, size: 1 };
+        const orderedVariants = productData.variants.map((entry, index) => ({ entry, index })).sort((a, b) => {
+          const pa = dimensionPriority[a.entry.dimension];
+          const pb = dimensionPriority[b.entry.dimension];
+          const ra = pa === void 0 ? 100 + a.index : pa;
+          const rb = pb === void 0 ? 100 + b.index : pb;
+          return ra - rb;
+        }).map((wrapped) => wrapped.entry);
+        orderedVariants.forEach((entry) => {
+          if (entry && entry.dimension && entry.value) {
+            lines.push(`  * ${entry.dimension}: ${entry.value}`);
+          }
+        });
+      }
+      if (productData.store && productData.store.url) {
+        const isSearch = productData.store.kind === "search";
+        const label = isSearch ? "search" : "store";
+        const storeName = productData.store.name || (isSearch ? "Brand" : "Store");
+        lines.push(`  * ${label}: [${storeName}](${productData.store.url})`);
+      }
+      const markdown = lines.join("\n");
+      log(`Built Amazon product markdown (${lines.length} lines)`);
+      logFunctionEnd("buildAmazonProductMarkdown");
+      return markdown;
+    }
+    function buildSettingsMenuOptions() {
+      return [
+        {
+          label: "Open settings\u2026",
+          displayValue: "Triggers and preferences",
+          tooltip: "Opens the Markdown Linker settings panel where you can configure key bindings and preferences.",
+          action: () => {
+            openTriggerSettings();
+            removeMenu();
+          }
+        },
+        {
+          label: "Quick-copy title",
+          displayValue: getAltZOption(altZTitlePreference).label,
+          tooltip: "Title format used for quiet copy and buffer copy. Click to cycle.",
+          action: () => {
+            cycleAltZTitlePreference();
+          }
+        },
+        {
+          label: "Capture",
+          displayValue: getCaptureOption(captureMode).label,
+          tooltip: "Toggle source+log capture to the local capture server.",
+          action: () => {
+            cycleCaptureMode();
+          }
+        },
+        {
+          label: "Debug mode",
+          displayValue: isDebug ? "on" : "off",
+          tooltip: "Enable console logging and reveal the Developer section in the popup.",
+          action: () => {
+            toggleIsDebug();
+          }
+        }
+      ];
+    }
+    function createMenu(x, y, isAnchor, anchor = null, isContextMenu = false) {
       logFunctionBegin("createMenu");
       log(`Will create menu at position (${x}, ${y}), isAnchor: ${isAnchor}`);
-      const capturedUrl = targetUrl;
-      log(`Captured URL for menu: "${capturedUrl}"`);
+      const capturedUrl = cleanUrl(targetUrl) || targetUrl;
+      log(`Captured URL for menu (cleaned): "${capturedUrl}"`);
       let youtubeContext = null;
       if (capturedUrl) {
         log("Will evaluate YouTube context for captured URL");
@@ -5233,30 +6013,61 @@ Open debugger to inspect?`;
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: rgba(18, 19, 22, 0.78);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 14px;
-            box-shadow: 0 22px 45px rgba(0, 0, 0, 0.65);
-            padding: 6px 0;
+            background: rgba(40, 38, 44, 0.74);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+            padding: 4px 0;
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 11px;
+            font-size: 13px;
             min-width: 220px;
             max-width: 520px;
             width: max-content;
             color: #f8f9fa;
-            backdrop-filter: blur(26px) saturate(120%);
+            backdrop-filter: blur(8px);
         `;
       log("Did create menu element");
       log("Will build menu options array");
-      const options = [];
-      const domainSectionOptions = [];
+      const domainSectionItems = [];
+      if (youtubeContext) {
+        log("YouTube context available, will append specialized menu options");
+        const youtubeOptions = buildYouTubeMenuOptions(youtubeContext, capturedUrl);
+        youtubeOptions.forEach((optionDescriptor) => {
+          log(`Queueing YouTube option: ${optionDescriptor.label}`);
+          domainSectionItems.push(optionDescriptor);
+        });
+      }
+      if (shouldEmitAmazonProductBlock(capturedUrl, !isAnchor)) {
+        log("Amazon product detected for current page, will build product details option");
+        let amazonProductData = null;
+        try {
+          amazonProductData = getAmazonProductData(capturedUrl);
+        } catch (error) {
+          logError(`Amazon product evaluation failed (non-fatal): ${error}`);
+        }
+        const amazonBlock = amazonProductData ? buildAmazonProductMarkdown(amazonProductData, capturedUrl) : null;
+        if (amazonBlock) {
+          const amazonTitle = amazonProductData.titleCleaned || amazonProductData.title || "Product details";
+          domainSectionItems.push({
+            label: "Amazon Product",
+            displayValue: amazonTitle,
+            tooltip: "Full product details block (title, ASIN, price) as a markdown snippet.",
+            getValue: () => amazonBlock,
+            isAllLinks: true
+          });
+          log("Queued Amazon Product details option");
+        } else {
+          log("No Amazon product details available for this URL");
+        }
+      }
+      const commonItems = [];
       if (isAnchor) {
         log("Is anchor, will get link text");
         const linkText = getLinkText(anchor);
         if (linkText) {
           log(`Did get link text, adding to options: "${linkText}"`);
-          options.push({
+          commonItems.push({
             label: "Link Text",
             displayValue: linkText,
             getValue: () => linkText
@@ -5269,9 +6080,10 @@ Open debugger to inspect?`;
       const pageTitle = getPageTitle();
       if (pageTitle) {
         log(`Did get page title, adding to options: "${pageTitle}"`);
-        options.push({
+        commonItems.push({
           label: "Page Title",
           displayValue: pageTitle,
+          tooltip: "Current document.title; may include notification counts or site suffixes.",
           getValue: () => pageTitle
         });
       } else {
@@ -5282,9 +6094,10 @@ Open debugger to inspect?`;
         const urlComponentTitle = getUrlComponentTitle(capturedUrl);
         if (urlComponentTitle) {
           log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
-          options.push({
+          commonItems.push({
             label: "URL (forward)",
             displayValue: urlComponentTitle,
+            tooltip: "Domain \u2192 path segments left-to-right.",
             getValue: () => urlComponentTitle
           });
         } else {
@@ -5293,27 +6106,14 @@ Open debugger to inspect?`;
         const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: "reverse" });
         if (urlComponentTitleLRU) {
           log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
-          options.push({
+          commonItems.push({
             label: "URL (reverse)",
             displayValue: urlComponentTitleLRU,
+            tooltip: "Domain \u2190 path segments right-to-left (most-specific first).",
             getValue: () => urlComponentTitleLRU
           });
         } else {
           log("Reverse URL component title unavailable");
-        }
-      }
-      if (youtubeContext) {
-        log("YouTube context available, will append specialized menu options");
-        const youtubeOptions = buildYouTubeMenuOptions(youtubeContext, capturedUrl);
-        if (youtubeOptions.length > 0) {
-          domainSectionOptions.push({
-            isSectionHeader: true,
-            label: "YouTube"
-          });
-          youtubeOptions.forEach((optionDescriptor) => {
-            log(`Queueing YouTube option: ${optionDescriptor.label}`);
-            domainSectionOptions.push(optionDescriptor);
-          });
         }
       }
       if (!isAnchor && !youtubeContext) {
@@ -5321,7 +6121,7 @@ Open debugger to inspect?`;
         const metaDesc = getMetaDescription();
         if (metaDesc) {
           log(`Did get meta description, adding to options: "${metaDesc}"`);
-          options.push({
+          commonItems.push({
             label: "Meta Description",
             displayValue: metaDesc,
             getValue: () => metaDesc
@@ -5330,52 +6130,94 @@ Open debugger to inspect?`;
           log("No meta description available");
         }
       }
-      if (domainSectionOptions.length > 0) {
-        log(`Adding ${domainSectionOptions.length} domain-specific entries (including headers)`);
-        domainSectionOptions.forEach((optionDescriptor) => options.push(optionDescriptor));
+      const options = [];
+      if (isContextMenu) {
+        options.push({
+          label: "Quick copy",
+          displayValue: `${getAltZOption(altZTitlePreference).label} \u2014 no menu`,
+          action: () => {
+            compileAndCopyBufferedLinks([{ url: capturedUrl, anchor: isAnchor ? anchor : null }]);
+            removeMenu();
+          }
+        });
       }
+      if (domainSectionItems.length > 0) {
+        log(`Adding ${domainSectionItems.length} domain-specific items`);
+        options.push({ isSectionHeader: true, label: "Domain Specific" });
+        domainSectionItems.forEach((item) => options.push(item));
+      }
+      options.push({ isSectionHeader: true, label: "Common" });
+      commonItems.forEach((item) => options.push(item));
       log("Adding extract all links options");
+      options.push({ isSectionHeader: true, label: "Lists" });
       options.push({
         label: "All Links (flat)",
         displayValue: "Single-level list",
+        tooltip: "All anchors on the page as a flat bullet list.",
         getValue: extractAllLinksFlat,
-        isAllLinks: true,
-        isSeparator: true
-        // Add visual separator above this item
+        isAllLinks: true
       });
       options.push({
         label: "All Links (tree)",
         displayValue: "Preserves heading depth",
+        tooltip: "All anchors grouped under the nearest heading (preserves document structure).",
         getValue: extractAllLinksHierarchical,
         isAllLinks: true
       });
+      options.push({ isSectionHeader: true, label: "Settings" });
+      buildSettingsMenuOptions().forEach((item) => options.push(item));
+      if (isDebug) {
+        options.push({ isSectionHeader: true, label: "Developer" });
+        options.push({
+          label: "Copy page state",
+          displayValue: "JSON to clipboard",
+          tooltip: "Copies current URL, title, capture mode, and debug state as JSON.",
+          action: () => {
+            const state = {
+              url: capturedUrl,
+              title: getPageTitle(),
+              captureMode,
+              isDebug,
+              altZTitlePreference,
+              isAnchor,
+              anchorHref: isAnchor && anchor ? anchor.href : null
+            };
+            try {
+              GM_setClipboard(JSON.stringify(state, null, 2), "text/plain");
+              showNotification("Page state copied to clipboard");
+            } catch (error) {
+              logError(`Copy page state failed: ${error}`);
+            }
+            removeMenu();
+          }
+        });
+      }
       log(`Did build ${options.length} menu options`);
       log("Will create menu items");
+      let isFirstSectionHeader = true;
       options.forEach((option, index) => {
         const debugLabel = option.displayValue ? `${option.label}: ${option.displayValue}` : option.label;
         log(`Creating menu item ${index}: "${debugLabel}"`);
         if (option.isSectionHeader) {
           const headerWrapper = document.createElement("div");
-          headerWrapper.style.cssText = `
-                    margin-top: 12px;
-                    padding: 0 12px;
-                `;
+          headerWrapper.style.cssText = `margin-top: ${isFirstSectionHeader ? "2px" : "8px"};`;
+          isFirstSectionHeader = false;
           const headerLine = document.createElement("div");
           headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.55);
-                    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+                    height: 1px;
+                    background: rgba(255, 255, 255, 0.40);
+                    margin: 0 6px 4px 6px;
                 `;
           const headerLabel = document.createElement("div");
           headerLabel.textContent = option.label;
           headerLabel.style.cssText = `
-                    margin-top: 6px;
-                    padding: 4px 2px 2px;
+                    margin-top: 3px;
+                    padding: 2px 0 2px 8px;
                     text-transform: uppercase;
                     letter-spacing: 0.18em;
                     font-size: 10px;
                     font-weight: 600;
-                    color: rgba(255, 255, 255, 0.85);
-                    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+                    color: rgba(255, 255, 255, 0.45);
                 `;
           headerWrapper.appendChild(headerLine);
           headerWrapper.appendChild(headerLabel);
@@ -5384,50 +6226,101 @@ Open debugger to inspect?`;
         }
         const item = document.createElement("div");
         item.style.cssText = `
-                padding: 8px 14px;
+                padding: 4px 14px 4px 20px;
                 cursor: pointer;
                 white-space: normal;
-                line-height: 1.4;
+                line-height: 1.3;
                 word-break: break-word;
                 color: inherit;
                 background-color: transparent;
                 transition: background-color 120ms ease;
-                ${option.isSeparator ? "border-top: 2px solid rgba(255,255,255,0.65); box-shadow: 0 -1px 0 rgba(0,0,0,0.65); margin-top: 12px; padding-top: 18px;" : ""}
             `;
         const labelElement = document.createElement("div");
+        let valueElement = null;
         if (option.displayValue) {
           labelElement.textContent = option.label;
           labelElement.style.cssText = `
                     font-size: 10px;
                     text-transform: uppercase;
                     letter-spacing: 0.08em;
-                    color: rgba(248, 249, 250, 0.65);
-                    margin-bottom: 2px;
+                    color: rgba(248, 249, 250, 0.5);
+                    margin-bottom: 1px;
                 `;
-          const valueElement = document.createElement("div");
+          valueElement = document.createElement("div");
           valueElement.textContent = option.displayValue;
           valueElement.style.cssText = `
-                    font-size: 12px;
+                    font-size: 13px;
                     color: #f8f9fa;
                 `;
-          item.appendChild(labelElement);
-          item.appendChild(valueElement);
         } else {
           labelElement.textContent = option.label;
           labelElement.style.cssText = `
-                    font-size: 12px;
+                    font-size: 13px;
                     color: #f8f9fa;
                 `;
+        }
+        if (option.tooltip) {
+          item.style.display = "flex";
+          item.style.alignItems = "flex-start";
+          const contentWrap = document.createElement("div");
+          contentWrap.style.cssText = "flex:1;min-width:0;";
+          contentWrap.appendChild(labelElement);
+          if (valueElement) {
+            contentWrap.appendChild(valueElement);
+          }
+          const icon = document.createElement("span");
+          icon.textContent = "\u24D8";
+          icon.style.cssText = "flex-shrink:0;margin-left:6px;margin-top:1px;opacity:0.45;cursor:help;user-select:none;font-size:11px;";
+          let tooltipBubble = null;
+          icon.addEventListener("mouseenter", () => {
+            tooltipBubble = document.createElement("div");
+            tooltipBubble.textContent = option.tooltip;
+            tooltipBubble.style.cssText = [
+              "position:fixed",
+              "z-index:1000001",
+              "max-width:240px",
+              "background:#111",
+              "color:#f8f9fa",
+              "border:1px solid rgba(255,255,255,0.2)",
+              "border-radius:6px",
+              "padding:6px 10px",
+              "font-size:11px",
+              "line-height:1.4",
+              "pointer-events:none",
+              "white-space:normal"
+            ].join(";");
+            document.body.appendChild(tooltipBubble);
+            const r = icon.getBoundingClientRect();
+            tooltipBubble.style.left = `${Math.min(r.left, window.innerWidth - 248)}px`;
+            tooltipBubble.style.top = `${Math.max(4, r.top - tooltipBubble.offsetHeight - 6)}px`;
+          });
+          icon.addEventListener("mouseleave", () => {
+            if (tooltipBubble) {
+              tooltipBubble.remove();
+              tooltipBubble = null;
+            }
+          });
+          item.appendChild(contentWrap);
+          item.appendChild(icon);
+        } else {
           item.appendChild(labelElement);
+          if (valueElement) {
+            item.appendChild(valueElement);
+          }
         }
         item.addEventListener("mouseenter", () => {
-          item.style.backgroundColor = "rgba(255, 255, 255, 0.08)";
+          item.style.backgroundColor = "color-mix(in srgb, Highlight 18%, transparent)";
         });
         item.addEventListener("mouseleave", () => {
           item.style.backgroundColor = "transparent";
         });
         item.addEventListener("click", () => {
           log(`Menu item clicked: "${option.label}"`);
+          if (option.action) {
+            log(`Settings action invoked: "${option.label}"`);
+            option.action();
+            return;
+          }
           if (option.isAllLinks) {
             log("All Links option selected, will extract all links");
             const allLinksMarkdown = option.getValue ? option.getValue() : null;
@@ -5438,6 +6331,11 @@ Open debugger to inspect?`;
                 GM_setClipboard(allLinksMarkdown, "text/plain");
                 log("Did copy all links to clipboard");
                 showNotification("All page links copied to clipboard!");
+                maybeCaptureSources({
+                  originalUrl: isAnchor && anchor ? anchor.href || capturedUrl : typeof window !== "undefined" && window.location && window.location.href || capturedUrl,
+                  format: (option.label || "").toLowerCase(),
+                  output: allLinksMarkdown
+                });
               } catch (error) {
                 logError(`Failed to copy all links: ${error}`);
                 alert("Failed to copy to clipboard. Check console for details.");
@@ -5462,7 +6360,10 @@ Open debugger to inspect?`;
               if (markdown) {
                 log(`Did create markdown: "${markdown}"`);
                 log("Will copy to clipboard");
-                copyToClipboard(markdown, title, resolvedUrl);
+                copyToClipboard(markdown, title, resolvedUrl, {
+                  originalUrl: isAnchor && anchor ? anchor.href || resolvedUrl : typeof window !== "undefined" && window.location && window.location.href || resolvedUrl,
+                  format: (option.label || "").toLowerCase()
+                });
                 log("Did copy to clipboard");
               } else {
                 logError("Markdown creation failed (returned null)");
@@ -5548,35 +6449,655 @@ Open debugger to inspect?`;
       log("Did clear target variables");
       logFunctionEnd("removeMenu");
     }
-    function shouldTrigger(event) {
-      logFunctionBegin("shouldTrigger");
-      log(`Checking if Alt key is pressed: ${event.altKey}`);
-      const result = event.altKey;
-      log(`Should trigger: ${result}`);
-      logFunctionEnd("shouldTrigger");
-      return result;
+    function cloneTerm(term) {
+      const t = {
+        modifiers: Object.assign({}, term.modifiers),
+        keys: (term.keys || []).slice(),
+        requiresClick: !!term.requiresClick
+      };
+      if (term.clickCount != null) {
+        t.clickCount = term.clickCount;
+      }
+      if (term.rightClick) {
+        t.rightClick = true;
+      }
+      return t;
+    }
+    function cloneBinding(binding) {
+      if (binding.terms) {
+        return { modifiers: {}, keys: [], requiresClick: false, terms: binding.terms.map(cloneTerm) };
+      }
+      return cloneTerm(binding);
+    }
+    function cloneTriggers(source) {
+      const out = {};
+      Object.keys(source || {}).forEach((action) => {
+        out[action] = (source[action] || []).map(cloneBinding);
+      });
+      return out;
+    }
+    function bindingState(event) {
+      return {
+        meta: !!event.metaKey,
+        ctrl: !!event.ctrlKey,
+        alt: !!event.altKey,
+        shift: !!event.shiftKey
+      };
+    }
+    const KEY_GLYPHS = {
+      " ": "\u2423",
+      "escape": "\u238B",
+      "tab": "\u21E5",
+      "enter": "\u21A9",
+      "backspace": "\u232B",
+      "delete": "\u2326",
+      "pageup": "\u21DE",
+      "pagedown": "\u21DF",
+      "home": "\u2196",
+      "end": "\u2198",
+      "arrowup": "\u2191",
+      "arrowdown": "\u2193",
+      "arrowleft": "\u2190",
+      "arrowright": "\u2192"
+    };
+    function normalizeKeyForStorage(eventKey) {
+      if (!eventKey || eventKey === "Unidentified") {
+        return null;
+      }
+      if (eventKey === "Shift" || eventKey === "Control" || eventKey === "Alt" || eventKey === "Meta") {
+        return null;
+      }
+      if (eventKey === "Escape") {
+        return null;
+      }
+      const lower = eventKey.toLowerCase();
+      if (eventKey.length === 1) {
+        return lower;
+      }
+      if (Object.prototype.hasOwnProperty.call(KEY_GLYPHS, lower)) {
+        return lower;
+      }
+      if (/^f([1-9]|1[0-9])$/.test(lower)) {
+        return lower;
+      }
+      return null;
+    }
+    function bindingHasInput(binding) {
+      if (binding.terms) {
+        return binding.terms.length > 0;
+      }
+      if (binding.requiresClick) {
+        return true;
+      }
+      const m = binding.modifiers || {};
+      return binding.keys && binding.keys.length > 0 || !!(m.meta || m.ctrl || m.alt || m.shift);
+    }
+    function matchesBinding(binding, state) {
+      if (!binding || !bindingHasInput(binding)) {
+        return false;
+      }
+      const m = binding.modifiers || {};
+      if (!!m.meta !== state.meta || !!m.ctrl !== state.ctrl || !!m.alt !== state.alt || !!m.shift !== state.shift) {
+        return false;
+      }
+      const keys = binding.keys || [];
+      for (let index = 0; index < keys.length; index += 1) {
+        if (!pressedKeys.has(keys[index])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    function actionMatchesClick(actionName, state, clickCount, isRightClick) {
+      const list = triggers[actionName] || [];
+      const n = clickCount || 1;
+      const right = !!isRightClick;
+      return list.some((binding) => {
+        if (!binding) {
+          return false;
+        }
+        if (binding.terms) {
+          const progress = chordProgress[actionName];
+          const lastIdx = binding.terms.length - 1;
+          if (!progress || progress.nextTermIdx !== lastIdx) {
+            return false;
+          }
+          const lastTerm = binding.terms[lastIdx];
+          if (!lastTerm || !lastTerm.requiresClick) {
+            return false;
+          }
+          if (!matchesBinding(lastTerm, state)) {
+            return false;
+          }
+          if ((lastTerm.clickCount || 1) !== n) {
+            return false;
+          }
+          return !!lastTerm.rightClick === right;
+        }
+        if (!binding.requiresClick) {
+          return false;
+        }
+        if (!matchesBinding(binding, state)) {
+          return false;
+        }
+        if ((binding.clickCount || 1) !== n) {
+          return false;
+        }
+        return !!binding.rightClick === right;
+      });
+    }
+    function keyboardActionTriggered(actionName, state, justPressedKey) {
+      const list = triggers[actionName] || [];
+      return list.some((binding) => binding && !binding.requiresClick && !binding.terms && (binding.keys || []).indexOf(justPressedKey) !== -1 && matchesBinding(binding, state));
+    }
+    const chordProgress = {};
+    function clearChordProgress(actionName) {
+      const p = chordProgress[actionName];
+      if (p && p.timer) {
+        clearTimeout(p.timer);
+      }
+      delete chordProgress[actionName];
+      debugTimerStop("playback");
+    }
+    function chordActionResult(actionName, state, justPressedKey) {
+      const list = triggers[actionName] || [];
+      const progress = chordProgress[actionName];
+      for (let bi = 0; bi < list.length; bi++) {
+        const binding = list[bi];
+        if (!binding || !binding.terms || binding.terms.length === 0) {
+          continue;
+        }
+        const expectedIdx = progress && progress.bindingIndex === bi ? progress.nextTermIdx : 0;
+        const term = binding.terms[expectedIdx];
+        if (!term || term.requiresClick) {
+          continue;
+        }
+        if ((term.keys || []).indexOf(justPressedKey) === -1) {
+          continue;
+        }
+        if (!matchesBinding(term, state)) {
+          continue;
+        }
+        clearChordProgress(actionName);
+        if (expectedIdx + 1 >= binding.terms.length) {
+          return "complete";
+        }
+        const timer = setTimeout(() => {
+          delete chordProgress[actionName];
+        }, CHORD_PLAYBACK_TIMEOUT_MS);
+        chordProgress[actionName] = { bindingIndex: bi, nextTermIdx: expectedIdx + 1, timer };
+        debugTimerStart("playback", CHORD_PLAYBACK_TIMEOUT_MS);
+        return "advance";
+      }
+      if (progress) {
+        clearChordProgress(actionName);
+      }
+      return null;
+    }
+    function loadTriggers() {
+      if (typeof GM_getValue === "function") {
+        try {
+          const stored = GM_getValue(TRIGGERS_PREF_KEY, null);
+          if (stored) {
+            const parsed = typeof stored === "string" ? JSON.parse(stored) : stored;
+            if (parsed && typeof parsed === "object") {
+              return cloneTriggers(parsed);
+            }
+          }
+        } catch (error) {
+          logWarn(`Failed to load triggers, using defaults: ${error}`);
+        }
+      }
+      return cloneTriggers(DEFAULT_TRIGGERS);
+    }
+    function saveTriggers() {
+      if (typeof GM_setValue === "function") {
+        try {
+          GM_setValue(TRIGGERS_PREF_KEY, JSON.stringify(triggers));
+        } catch (error) {
+          logWarn(`Failed to save triggers: ${error}`);
+        }
+      }
+    }
+    const ACTION_LABELS = {
+      menu: "Open menu",
+      inferQuiet: "Quiet copy (no menu)",
+      inferBuffer: "Buffer links (hold + click)",
+      openSettings: "Open settings",
+      toggleDebugPanel: "Toggle debug panel"
+    };
+    let settingsPanelEl = null;
+    let settingsBodyEl = null;
+    let recordingAction = null;
+    let recordOverlayEl = null;
+    let recordTerms = [];
+    let recordCurrentModifiers = null;
+    let recordCurrentKeys = null;
+    let recordCurrentClickCount = 0;
+    let recordCurrentRightClick = false;
+    let recordChordTimer = null;
+    let recordClickTimer = null;
+    function formatTerm(term) {
+      const parts = [];
+      const m = term.modifiers || {};
+      if (m.meta) {
+        parts.push("\u2318");
+      }
+      if (m.ctrl) {
+        parts.push("\u2303");
+      }
+      if (m.alt) {
+        parts.push("\u2325");
+      }
+      if (m.shift) {
+        parts.push("\u21E7");
+      }
+      (term.keys || []).forEach((key) => {
+        const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, key) ? KEY_GLYPHS[key] : null;
+        if (glyph !== null) {
+          parts.push(glyph);
+        } else if (key.length === 1) {
+          parts.push(key.toUpperCase());
+        } else {
+          parts.push(key.charAt(0).toUpperCase() + key.slice(1));
+        }
+      });
+      let label = parts.join("+");
+      if (term.requiresClick) {
+        const n = term.clickCount || 1;
+        const clickLabel = term.rightClick ? n >= 2 ? "double-right-click" : "right-click" : n === 2 ? "double-click" : n >= 3 ? `${n}\xD7click` : "click";
+        label = label ? `${label}+${clickLabel}` : clickLabel;
+      }
+      return label || "(none)";
+    }
+    function formatBinding(binding) {
+      if (binding.terms && binding.terms.length > 0) {
+        const termLabels = binding.terms.map(formatTerm);
+        return termLabels.length >= 2 ? `[${termLabels.join(" ")}]` : termLabels[0] || "(none)";
+      }
+      return formatTerm(binding);
+    }
+    function formatActionBindings(actionName) {
+      const list = triggers[actionName] || [];
+      return list.length ? list.map(formatBinding).join("  or  ") : "(none)";
+    }
+    function styleSettingsButton(button) {
+      button.style.cssText = "margin-left:8px;padding:3px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#f8f9fa;font-size:12px;cursor:pointer;";
+    }
+    function resetCurrentTerm() {
+      recordCurrentModifiers = { meta: false, ctrl: false, alt: false, shift: false };
+      recordCurrentKeys = /* @__PURE__ */ new Set();
+      recordCurrentClickCount = 0;
+      recordCurrentRightClick = false;
+    }
+    function clearRecordTimers() {
+      if (recordChordTimer) {
+        clearTimeout(recordChordTimer);
+        recordChordTimer = null;
+      }
+      if (recordClickTimer) {
+        clearTimeout(recordClickTimer);
+        recordClickTimer = null;
+      }
+      debugTimerStop("record");
+    }
+    function updateRecordOverlay() {
+      if (!recordOverlayEl) {
+        return;
+      }
+      const preview = recordOverlayEl.querySelector("#markdown-linker-record-preview");
+      if (!preview) {
+        return;
+      }
+      const completedLabels = recordTerms.map(formatBinding);
+      const hasCurrent = recordCurrentKeys && recordCurrentKeys.size > 0;
+      const currentLabel = hasCurrent ? formatTerm({ modifiers: recordCurrentModifiers || {}, keys: Array.from(recordCurrentKeys) }) + " \u2026" : "";
+      const allParts = completedLabels.concat(currentLabel ? [currentLabel] : completedLabels.length === 0 ? ["\u2026"] : []);
+      if (allParts.length >= 2) {
+        preview.textContent = `[${allParts.join(" ")}]`;
+      } else {
+        preview.textContent = allParts[0] || "\u2026";
+      }
+    }
+    function hideRecordOverlay() {
+      if (recordOverlayEl) {
+        recordOverlayEl.remove();
+        recordOverlayEl = null;
+      }
+    }
+    function showRecordOverlay(actionName) {
+      hideRecordOverlay();
+      const overlay = document.createElement("div");
+      overlay.id = "markdown-linker-record-overlay";
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1000001;display:flex;align-items:center;justify-content:center;color:#fff;font-family:sans-serif;text-align:center;";
+      const box = document.createElement("div");
+      box.style.cssText = "max-width:80vw;padding:0 20px;";
+      const heading = document.createElement("div");
+      heading.textContent = `Recording: ${ACTION_LABELS[actionName] || actionName}`;
+      heading.style.cssText = "font-size:18px;font-weight:600;margin-bottom:8px;";
+      const instr = document.createElement("div");
+      instr.textContent = "Press keys and release to end each term; pause 500 ms to commit the chord. Click or right-click ends immediately. Esc cancels.";
+      instr.style.cssText = "font-size:13px;opacity:0.8;margin-bottom:12px;";
+      const preview = document.createElement("div");
+      preview.id = "markdown-linker-record-preview";
+      preview.textContent = "\u2026";
+      preview.style.cssText = "font-size:22px;font-weight:700;letter-spacing:0.04em;";
+      box.appendChild(heading);
+      box.appendChild(instr);
+      box.appendChild(preview);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      recordOverlayEl = overlay;
+    }
+    function accumulateRecordModifiers(event) {
+      if (!recordCurrentModifiers) {
+        return;
+      }
+      const state = bindingState(event);
+      recordCurrentModifiers.meta = recordCurrentModifiers.meta || state.meta;
+      recordCurrentModifiers.ctrl = recordCurrentModifiers.ctrl || state.ctrl;
+      recordCurrentModifiers.alt = recordCurrentModifiers.alt || state.alt;
+      recordCurrentModifiers.shift = recordCurrentModifiers.shift || state.shift;
+    }
+    function captureTerm(requiresClick, clickCount, rightClick) {
+      return {
+        modifiers: {
+          meta: !!(recordCurrentModifiers && recordCurrentModifiers.meta),
+          ctrl: !!(recordCurrentModifiers && recordCurrentModifiers.ctrl),
+          alt: !!(recordCurrentModifiers && recordCurrentModifiers.alt),
+          shift: !!(recordCurrentModifiers && recordCurrentModifiers.shift)
+        },
+        keys: Array.from(recordCurrentKeys || []),
+        requiresClick: !!requiresClick,
+        ...requiresClick && clickCount && clickCount > 1 ? { clickCount } : {},
+        ...requiresClick && rightClick ? { rightClick: true } : {}
+      };
+    }
+    function commitChord() {
+      const action = recordingAction;
+      if (!action) {
+        return;
+      }
+      if (recordTerms.length === 0) {
+        stopRecording();
+        return;
+      }
+      let binding;
+      if (recordTerms.length === 1) {
+        binding = recordTerms[0];
+      } else {
+        binding = { modifiers: {}, keys: [], requiresClick: false, terms: recordTerms.slice() };
+      }
+      if (!bindingHasInput(binding)) {
+        stopRecording();
+        return;
+      }
+      triggers[action] = [binding];
+      saveTriggers();
+      log(`Recorded ${action} trigger: ${formatBinding(binding)}`);
+      stopRecording();
+    }
+    function recordKeydownHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        stopRecording();
+        return;
+      }
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      const storageKey = normalizeKeyForStorage(event.key);
+      if (storageKey) {
+        recordCurrentKeys.add(storageKey);
+      }
+      updateRecordOverlay();
+    }
+    function recordKeyupHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (recordCurrentKeys && recordCurrentKeys.size > 0) {
+        recordTerms.push(captureTerm(false));
+        resetCurrentTerm();
+        recordChordTimer = setTimeout(() => {
+          recordChordTimer = null;
+          commitChord();
+        }, CHORD_RECORD_TIMEOUT_MS);
+        debugTimerStart("record", CHORD_RECORD_TIMEOUT_MS);
+        updateRecordOverlay();
+        updateDebugPanelState();
+      }
+    }
+    function recordClickHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      recordCurrentClickCount++;
+      recordClickTimer = setTimeout(() => {
+        recordClickTimer = null;
+        recordTerms.push(captureTerm(true, recordCurrentClickCount, false));
+        resetCurrentTerm();
+        commitChord();
+      }, 300);
+      updateRecordOverlay();
+    }
+    function recordContextMenuHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      recordCurrentClickCount++;
+      recordCurrentRightClick = true;
+      recordClickTimer = setTimeout(() => {
+        recordClickTimer = null;
+        recordTerms.push(captureTerm(true, recordCurrentClickCount, true));
+        resetCurrentTerm();
+        commitChord();
+      }, 300);
+      updateRecordOverlay();
+    }
+    function startRecording(actionName) {
+      recordingAction = actionName;
+      recordTerms = [];
+      resetCurrentTerm();
+      window.addEventListener("keydown", recordKeydownHandler, true);
+      window.addEventListener("keyup", recordKeyupHandler, true);
+      window.addEventListener("click", recordClickHandler, true);
+      window.addEventListener("contextmenu", recordContextMenuHandler, true);
+      showRecordOverlay(actionName);
+      updateDebugPanelState();
+    }
+    function stopRecording() {
+      clearRecordTimers();
+      window.removeEventListener("keydown", recordKeydownHandler, true);
+      window.removeEventListener("keyup", recordKeyupHandler, true);
+      window.removeEventListener("click", recordClickHandler, true);
+      window.removeEventListener("contextmenu", recordContextMenuHandler, true);
+      recordingAction = null;
+      recordTerms = [];
+      resetCurrentTerm();
+      hideRecordOverlay();
+      refreshSettingsPanel();
+      updateDebugPanelState();
+    }
+    function renderSettingsBody(body) {
+      body.textContent = "";
+      Object.keys(ACTION_LABELS).forEach((action) => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+        const left = document.createElement("div");
+        const name = document.createElement("div");
+        name.textContent = ACTION_LABELS[action];
+        name.style.cssText = "font-size:13px;color:#f8f9fa;";
+        const bindingLabel = document.createElement("div");
+        bindingLabel.textContent = formatActionBindings(action);
+        bindingLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+        left.appendChild(name);
+        left.appendChild(bindingLabel);
+        const right = document.createElement("div");
+        const recordButton = document.createElement("button");
+        recordButton.textContent = "Record";
+        styleSettingsButton(recordButton);
+        recordButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          startRecording(action);
+        });
+        const resetButton = document.createElement("button");
+        resetButton.textContent = "Reset";
+        styleSettingsButton(resetButton);
+        resetButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          triggers[action] = cloneTriggers(DEFAULT_TRIGGERS)[action];
+          saveTriggers();
+          refreshSettingsPanel();
+        });
+        right.appendChild(recordButton);
+        right.appendChild(resetButton);
+        row.appendChild(left);
+        row.appendChild(right);
+        body.appendChild(row);
+      });
+      const prefSectionLabel = document.createElement("div");
+      prefSectionLabel.textContent = "Preferences";
+      prefSectionLabel.style.cssText = "font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(248,249,250,0.45);margin-top:14px;margin-bottom:4px;";
+      body.appendChild(prefSectionLabel);
+      const titleRow = document.createElement("div");
+      titleRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+      const titleLeft = document.createElement("div");
+      const titleName = document.createElement("div");
+      titleName.textContent = "Quick-copy title";
+      titleName.style.cssText = "font-size:13px;color:#f8f9fa;";
+      const titleValueLabel = document.createElement("div");
+      titleValueLabel.textContent = getAltZOption(altZTitlePreference).label;
+      titleValueLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+      titleLeft.appendChild(titleName);
+      titleLeft.appendChild(titleValueLabel);
+      const titleRight = document.createElement("div");
+      const cycleButton = document.createElement("button");
+      cycleButton.textContent = "Cycle";
+      styleSettingsButton(cycleButton);
+      cycleButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        cycleAltZTitlePreference();
+      });
+      const titleResetButton = document.createElement("button");
+      titleResetButton.textContent = "Reset";
+      styleSettingsButton(titleResetButton);
+      titleResetButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+        persistAltZTitlePreference();
+      });
+      titleRight.appendChild(cycleButton);
+      titleRight.appendChild(titleResetButton);
+      titleRow.appendChild(titleLeft);
+      titleRow.appendChild(titleRight);
+      body.appendChild(titleRow);
+      const debugRow = document.createElement("div");
+      debugRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);";
+      const debugLeft = document.createElement("div");
+      const debugName = document.createElement("div");
+      debugName.textContent = "Debug mode";
+      debugName.style.cssText = "font-size:13px;color:#f8f9fa;";
+      const debugValueLabel = document.createElement("div");
+      debugValueLabel.textContent = isDebug ? "on" : "off";
+      debugValueLabel.style.cssText = "font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;";
+      debugLeft.appendChild(debugName);
+      debugLeft.appendChild(debugValueLabel);
+      const debugRight = document.createElement("div");
+      const debugToggleButton = document.createElement("button");
+      debugToggleButton.textContent = "Toggle";
+      styleSettingsButton(debugToggleButton);
+      debugToggleButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleIsDebug();
+      });
+      debugRight.appendChild(debugToggleButton);
+      debugRow.appendChild(debugLeft);
+      debugRow.appendChild(debugRight);
+      body.appendChild(debugRow);
+    }
+    function refreshSettingsPanel() {
+      if (settingsBodyEl) {
+        renderSettingsBody(settingsBodyEl);
+      }
+    }
+    function closeTriggerSettings() {
+      if (settingsPanelEl) {
+        settingsPanelEl.remove();
+        settingsPanelEl = null;
+        settingsBodyEl = null;
+      }
+    }
+    function openTriggerSettings() {
+      closeTriggerSettings();
+      const panel = document.createElement("div");
+      panel.id = "markdown-linker-settings";
+      panel.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:#1f1f1f;color:#f8f9fa;border:1px solid rgba(255,255,255,0.25);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.6);z-index:1000000;font-family:sans-serif;padding:16px;";
+      const title = document.createElement("div");
+      title.textContent = "Markdown Linker \u2014 Settings";
+      title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:4px;";
+      const hint = document.createElement("div");
+      hint.textContent = "Click Record, then press your keys and/or click. Esc cancels.";
+      hint.style.cssText = "font-size:11px;color:rgba(248,249,250,0.6);margin-bottom:10px;";
+      const body = document.createElement("div");
+      const footer = document.createElement("div");
+      footer.style.cssText = "display:flex;justify-content:flex-end;margin-top:12px;";
+      const resetAll = document.createElement("button");
+      resetAll.textContent = "Reset all";
+      styleSettingsButton(resetAll);
+      resetAll.addEventListener("click", (event) => {
+        event.stopPropagation();
+        triggers = cloneTriggers(DEFAULT_TRIGGERS);
+        saveTriggers();
+        refreshSettingsPanel();
+      });
+      const closeButton = document.createElement("button");
+      closeButton.textContent = "Close";
+      styleSettingsButton(closeButton);
+      closeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeTriggerSettings();
+      });
+      footer.appendChild(resetAll);
+      footer.appendChild(closeButton);
+      panel.appendChild(title);
+      panel.appendChild(hint);
+      panel.appendChild(body);
+      panel.appendChild(footer);
+      document.body.appendChild(panel);
+      settingsPanelEl = panel;
+      settingsBodyEl = body;
+      renderSettingsBody(body);
+    }
+    function registerSettingsMenuCommand() {
+      if (typeof GM_registerMenuCommand === "function") {
+        GM_registerMenuCommand("Markdown Linker: settings\u2026", openTriggerSettings);
+      }
     }
     function handleClick(event) {
       logFunctionBegin("handleClick");
       log("Click event received");
-      const isAltPressed = event.altKey;
-      const isZPressed = isZKeyDown;
-      log(`Click: altKey=${isAltPressed}, z down=${isZPressed}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
-      if (!shouldTrigger(event)) {
-        log("Should not trigger (Alt key not pressed), returning");
+      const clickState = bindingState(event);
+      const menuClick = actionMatchesClick("menu", clickState, event.detail || 1, false);
+      const bufferClick = actionMatchesClick("inferBuffer", clickState, event.detail || 1, false);
+      log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${inferBufferActive}, buffer size=${inferBufferLinks.length}`);
+      if (!menuClick && !bufferClick) {
+        log("No click trigger matched, returning");
+        markDebugEventStatus(debugLastClickEventEl, false);
         logFunctionEnd("handleClick");
         return;
       }
       log("Will prevent default and stop propagation");
       event.preventDefault();
       event.stopPropagation();
+      markDebugEventStatus(debugLastClickEventEl, true);
       log("Did prevent default and stop propagation");
-      log("Will check if Alt+Z keys are pressed (auto-infer mode)");
-      const isAutoInferMode = event.altKey && isZKeyDown;
-      log(`Is auto-infer mode (Alt+Z+Click): ${isAutoInferMode}`);
-      if (isAutoInferMode && !isAltZBufferActive) {
-        isAltZBufferActive = true;
-        log("Activated Alt+Z buffer mode");
+      const isAutoInferMode = bufferClick;
+      log(`Is auto-infer (buffer) mode: ${isAutoInferMode}`);
+      if (isAutoInferMode && !inferBufferActive) {
+        activateInferBuffer(event);
+        setDebugLastAction("inferBuffer activated");
       }
       log("Will find closest anchor element");
       const anchor = event.target.closest("a");
@@ -5593,8 +7114,8 @@ Open debugger to inspect?`;
             log("Will show click feedback animation");
             showClickFeedback(event.clientX, event.clientY);
             log("Did show click feedback animation");
-            altZClickBuffer.push({ url: targetUrl, anchor });
-            log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+            inferBufferLinks.push({ url: targetUrl, anchor });
+            log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
           } else {
             log("In normal mode, will create menu for anchor");
             if (maybeAutoCopySelection(false, targetUrl)) {
@@ -5614,8 +7135,8 @@ Open debugger to inspect?`;
             log("Will show click feedback animation");
             showClickFeedback(event.clientX, event.clientY);
             log("Did show click feedback animation");
-            altZClickBuffer.push({ url: targetUrl, anchor: null });
-            log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+            inferBufferLinks.push({ url: targetUrl, anchor: null });
+            log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
           } else {
             log("In normal mode, will create menu for page (fallback)");
             if (maybeAutoCopySelection(false, targetUrl)) {
@@ -5636,8 +7157,8 @@ Open debugger to inspect?`;
           log("Will show click feedback animation");
           showClickFeedback(event.clientX, event.clientY);
           log("Did show click feedback animation");
-          altZClickBuffer.push({ url: targetUrl, anchor: null });
-          log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+          inferBufferLinks.push({ url: targetUrl, anchor: null });
+          log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
         } else {
           log("In normal mode, will create menu for page");
           if (maybeAutoCopySelection(false, targetUrl)) {
@@ -5653,14 +7174,17 @@ Open debugger to inspect?`;
     function handleContextMenu(event) {
       logFunctionBegin("handleContextMenu");
       log("Context menu (right-click) event received");
-      if (!shouldTrigger(event)) {
-        log("Should not trigger (Alt key not pressed), returning");
+      const contextState = bindingState(event);
+      if (!actionMatchesClick("menu", contextState, event.detail || 1, true)) {
+        log("No menu trigger matched on right-click, returning");
+        markDebugEventStatus(debugLastClickEventEl, false);
         logFunctionEnd("handleContextMenu");
         return;
       }
       log("Will prevent default and stop propagation");
       event.preventDefault();
       event.stopPropagation();
+      markDebugEventStatus(debugLastClickEventEl, true);
       log("Did prevent default and stop propagation");
       log("Will find closest anchor element");
       const anchor = event.target.closest("a");
@@ -5678,7 +7202,14 @@ Open debugger to inspect?`;
             logFunctionEnd("handleContextMenu");
             return;
           }
-          createMenu(event.clientX, event.clientY, true, anchor);
+          createMenu(
+            event.clientX,
+            event.clientY,
+            true,
+            anchor,
+            true
+            /* isContextMenu */
+          );
         } else {
           logError("URL validation failed, using current page URL as fallback");
           targetUrl = window.location.href;
@@ -5690,7 +7221,14 @@ Open debugger to inspect?`;
             logFunctionEnd("handleContextMenu");
             return;
           }
-          createMenu(event.clientX, event.clientY, false);
+          createMenu(
+            event.clientX,
+            event.clientY,
+            false,
+            null,
+            true
+            /* isContextMenu */
+          );
         }
       } else {
         log("Right-clicked on page (not an anchor)");
@@ -5703,7 +7241,14 @@ Open debugger to inspect?`;
           logFunctionEnd("handleContextMenu");
           return;
         }
-        createMenu(event.clientX, event.clientY, false);
+        createMenu(
+          event.clientX,
+          event.clientY,
+          false,
+          null,
+          true
+          /* isContextMenu */
+        );
       }
       logFunctionEnd("handleContextMenu");
     }
@@ -5715,29 +7260,93 @@ Open debugger to inspect?`;
       log(`Is input field: ${isInputField}`);
       const isTextArea = target instanceof HTMLTextAreaElement;
       log(`Is textarea: ${isTextArea}`);
-      const isContentEditable = target && target.contentEditable === "true" || target ? target.closest('[contenteditable="true"]') : null;
-      log(`Is contenteditable: ${!!isContentEditable}`);
+      const isContentEditable = !!(target && (target.contentEditable === "true" || typeof target.closest === "function" && target.closest('[contenteditable="true"]')));
+      log(`Is contenteditable: ${isContentEditable}`);
       const result = isInputField || isTextArea || !!isContentEditable;
       log(`Should skip keyboard trigger: ${result}`);
       logFunctionEnd("isInEditableContext");
       return result;
     }
     function handleKeydown(event) {
-      const isM = event.key === "m" || event.key === "M";
-      const isAltM = isM && event.altKey;
-      const isMalone = isM && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey;
-      if (isAltM || isMalone) {
+      if (event.repeat) {
+        return;
+      }
+      const justPressedKey = normalizeKeyForStorage(event.key);
+      const keyState = bindingState(event);
+      const menuChordResult = justPressedKey ? chordActionResult("menu", keyState, justPressedKey) : null;
+      const inferChordResult = justPressedKey ? chordActionResult("inferQuiet", keyState, justPressedKey) : null;
+      const settingsChordResult = justPressedKey ? chordActionResult("openSettings", keyState, justPressedKey) : null;
+      const debugPanelChordResult = justPressedKey ? chordActionResult("toggleDebugPanel", keyState, justPressedKey) : null;
+      const isMenuKey = !!justPressedKey && (keyboardActionTriggered("menu", keyState, justPressedKey) || menuChordResult === "complete");
+      const isInferKey = !!justPressedKey && (keyboardActionTriggered("inferQuiet", keyState, justPressedKey) || inferChordResult === "complete");
+      const isSettingsKey = !!justPressedKey && (keyboardActionTriggered("openSettings", keyState, justPressedKey) || settingsChordResult === "complete");
+      const isDebugPanelKey = !!justPressedKey && (keyboardActionTriggered("toggleDebugPanel", keyState, justPressedKey) || debugPanelChordResult === "complete");
+      const isChordAdvancing = menuChordResult === "advance" || inferChordResult === "advance" || settingsChordResult === "advance" || debugPanelChordResult === "advance";
+      if (isSettingsKey) {
+        if (isInEditableContext(event)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        pressedKeys.clear();
+        markDebugEventStatus(debugLastKeyEventEl, true);
+        setDebugLastAction("settings toggled");
+        const panelIsOpen = settingsPanelEl && document.body.contains(settingsPanelEl);
+        if (panelIsOpen) {
+          closeTriggerSettings();
+        } else {
+          openTriggerSettings();
+        }
+        return;
+      }
+      if (isDebugPanelKey) {
+        if (!isDebug) {
+          markDebugEventStatus(debugLastKeyEventEl, false);
+          return;
+        }
+        if (isInEditableContext(event)) {
+          markDebugEventStatus(debugLastKeyEventEl, false);
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        pressedKeys.clear();
+        markDebugEventStatus(debugLastKeyEventEl, true);
+        setDebugLastAction("debug panel toggled");
+        toggleDebugPanel();
+        return;
+      }
+      if (isChordAdvancing) {
+        event.preventDefault();
+        event.stopPropagation();
+        markDebugEventStatus(debugLastKeyEventEl, true);
+        return;
+      }
+      if (isMenuKey || isInferKey) {
         logFunctionBegin("handleKeydown");
-        log("Trigger key combination detected");
-        if (isMalone && isInEditableContext(event)) {
-          log("M alone in editable context (input/textarea/contenteditable), skipping trigger");
+        log(`Keyboard trigger detected (key=${justPressedKey}, menu=${isMenuKey}, inferQuiet=${isInferKey})`);
+        if (isInEditableContext(event)) {
+          log("In editable context (input/textarea/contenteditable), skipping keyboard trigger");
+          markDebugEventStatus(debugLastKeyEventEl, false);
           logFunctionEnd("handleKeydown");
           return;
         }
         log("Will prevent default and stop propagation");
         event.preventDefault();
         event.stopPropagation();
+        markDebugEventStatus(debugLastKeyEventEl, true);
         log("Did prevent default and stop propagation");
+        if (isInferKey) {
+          const inferHovered = document.elementFromPoint(mouseX, mouseY);
+          const inferAnchor = inferHovered ? inferHovered.closest("a") : null;
+          const inferRawUrl = inferAnchor ? extractUrlFromAnchor(inferAnchor, event) : window.location.href;
+          log("Keyboard auto-infer: copying single link without menu");
+          setDebugLastAction("inferQuiet fired (key: " + justPressedKey + ")");
+          compileAndCopyBufferedLinks([{ url: inferRawUrl, anchor: inferAnchor }]);
+          logFunctionEnd("handleKeydown");
+          return;
+        }
+        setDebugLastAction("menu fired (key: " + justPressedKey + ")");
         log(`Will check element at mouse position (${mouseX}, ${mouseY})`);
         const hoveredElement = document.elementFromPoint(mouseX, mouseY);
         log(`Found element: ${hoveredElement ? hoveredElement.tagName : "null"}`);
@@ -5785,6 +7394,8 @@ Open debugger to inspect?`;
           createMenu(mouseX, mouseY, false);
         }
         logFunctionEnd("handleKeydown");
+      } else {
+        markDebugEventStatus(debugLastKeyEventEl, false);
       }
     }
     let mouseX = 0;
@@ -5793,21 +7404,492 @@ Open debugger to inspect?`;
     document.addEventListener("mousemove", (event) => {
       mouseX = event.clientX;
       mouseY = event.clientY;
+      if (isDebugPanelVisible && !debugCursorThrottle) {
+        debugCursorThrottle = setTimeout(() => {
+          debugCursorThrottle = null;
+          updateDebugCursor();
+        }, 100);
+      }
     });
     log("Did add mousemove listener");
     const pressedKeys = /* @__PURE__ */ new Set();
-    let altZClickBuffer = [];
-    let isAltZBufferActive = false;
-    log("Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)");
-    let isZKeyDown = false;
+    let inferBufferLinks = [];
+    let inferBufferActive = false;
+    let inferBufferHoldMeta = false;
+    let inferBufferHoldCtrl = false;
+    let inferBufferHoldAlt = false;
+    let inferBufferHoldShift = false;
+    let inferBufferHoldKeys = /* @__PURE__ */ new Set();
+    function activateInferBuffer(clickEvent) {
+      inferBufferActive = true;
+      inferBufferLinks = [];
+      inferBufferHoldMeta = !!(clickEvent && clickEvent.metaKey);
+      inferBufferHoldCtrl = !!(clickEvent && clickEvent.ctrlKey);
+      inferBufferHoldAlt = !!(clickEvent && clickEvent.altKey);
+      inferBufferHoldShift = !!(clickEvent && clickEvent.shiftKey);
+      inferBufferHoldKeys = new Set(pressedKeys);
+      log(`Infer buffer activated. Hold: meta=${inferBufferHoldMeta}, ctrl=${inferBufferHoldCtrl}, alt=${inferBufferHoldAlt}, shift=${inferBufferHoldShift}, keys=[${[...inferBufferHoldKeys].join(",")}]`);
+      updateDebugPanelState();
+    }
+    function finalizeInferBuffer() {
+      if (!inferBufferActive) {
+        return;
+      }
+      inferBufferActive = false;
+      const links = inferBufferLinks;
+      inferBufferLinks = [];
+      inferBufferHoldKeys = /* @__PURE__ */ new Set();
+      inferBufferHoldMeta = false;
+      inferBufferHoldCtrl = false;
+      inferBufferHoldAlt = false;
+      inferBufferHoldShift = false;
+      updateDebugPanelState();
+      if (links.length > 0) {
+        log(`Finalizing infer buffer with ${links.length} links`);
+        setDebugLastAction("inferBuffer finalized (" + links.length + " links)");
+        compileAndCopyBufferedLinks(links);
+      } else {
+        log("Infer buffer finalized (empty, nothing to copy)");
+      }
+    }
+    let isDebugPanelVisible = false;
+    let debugPanelEl = null;
+    let debugLastKeyEventEl = null;
+    let debugLastClickEventEl = null;
+    let debugCursorThrottle = null;
+    let debugEventCounter = 0;
+    function debugTimerStart(timerId, durationMs) {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return;
+      }
+      const ring = debugPanelEl.querySelector("#ml-debug-ring-" + timerId);
+      const fill = debugPanelEl.querySelector("#ml-debug-fill-" + timerId);
+      if (!ring || !fill) {
+        return;
+      }
+      fill.style.fill = "rgba(239,68,68,0.55)";
+      ring.style.animation = "none";
+      void ring.getBoundingClientRect();
+      ring.style.animationDuration = durationMs + "ms";
+      ring.style.animation = `mlTimerRing ${durationMs}ms linear forwards`;
+    }
+    function debugTimerStop(timerId) {
+      if (!debugPanelEl) {
+        return;
+      }
+      const ring = debugPanelEl.querySelector("#ml-debug-ring-" + timerId);
+      const fill = debugPanelEl.querySelector("#ml-debug-fill-" + timerId);
+      if (!ring) {
+        return;
+      }
+      ring.style.animation = "none";
+      if (fill) {
+        fill.style.fill = "transparent";
+      }
+    }
+    function createTimerSvg(timerId) {
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("width", "36");
+      svg.setAttribute("height", "36");
+      svg.style.cssText = "flex-shrink:0;";
+      const track = document.createElementNS(ns, "circle");
+      track.setAttribute("cx", "18");
+      track.setAttribute("cy", "18");
+      track.setAttribute("r", "13");
+      track.setAttribute("fill", "none");
+      track.setAttribute("stroke", "rgba(255,255,255,0.2)");
+      track.setAttribute("stroke-width", "4");
+      const fill = document.createElementNS(ns, "circle");
+      fill.id = "ml-debug-fill-" + timerId;
+      fill.setAttribute("cx", "18");
+      fill.setAttribute("cy", "18");
+      fill.setAttribute("r", "11");
+      fill.setAttribute("fill", "transparent");
+      const circ = 2 * Math.PI * 13;
+      const ring = document.createElementNS(ns, "circle");
+      ring.id = "ml-debug-ring-" + timerId;
+      ring.setAttribute("cx", "18");
+      ring.setAttribute("cy", "18");
+      ring.setAttribute("r", "13");
+      ring.setAttribute("fill", "none");
+      ring.setAttribute("stroke", "rgba(255,255,255,0.9)");
+      ring.setAttribute("stroke-width", "4");
+      ring.setAttribute("stroke-dasharray", String(circ));
+      ring.setAttribute("stroke-dashoffset", "0");
+      ring.style.cssText = "transform-origin:18px 18px;transform:rotate(-90deg);";
+      svg.appendChild(track);
+      svg.appendChild(fill);
+      svg.appendChild(ring);
+      return svg;
+    }
+    function createTimerRow(timerId, title, constName, constValue) {
+      const row = document.createElement("div");
+      row.style.cssText = "padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.1);";
+      const titleEl = document.createElement("div");
+      titleEl.textContent = title;
+      titleEl.style.cssText = "font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.5);margin-bottom:4px;";
+      row.appendChild(titleEl);
+      const hstack = document.createElement("div");
+      hstack.style.cssText = "display:flex;align-items:center;gap:8px;";
+      hstack.appendChild(createTimerSvg(timerId));
+      const labels = document.createElement("div");
+      labels.style.cssText = "display:flex;flex-direction:column;gap:1px;";
+      const nameEl = document.createElement("div");
+      nameEl.textContent = constName;
+      nameEl.style.cssText = "font-size:10px;color:rgba(255,255,255,0.6);font-family:monospace;";
+      const valEl = document.createElement("div");
+      valEl.textContent = constValue + " ms";
+      valEl.style.cssText = "font-size:12px;color:#f8f9fa;font-family:monospace;";
+      labels.appendChild(nameEl);
+      labels.appendChild(valEl);
+      hstack.appendChild(labels);
+      row.appendChild(hstack);
+      return row;
+    }
+    function ensureTimerKeyframes() {
+      if (document.getElementById("ml-debug-keyframes")) {
+        return;
+      }
+      const style2 = document.createElement("style");
+      style2.id = "ml-debug-keyframes";
+      const circ = 2 * Math.PI * 13;
+      style2.textContent = `
+            @keyframes mlTimerRing {
+                from { stroke-dashoffset: 0; }
+                to   { stroke-dashoffset: ${circ}; }
+            }
+            @keyframes mlDebugEventFadeOut {
+                from { opacity: 1; }
+                to   { opacity: 0; }
+            }
+        `;
+      document.head.appendChild(style2);
+    }
+    function logDebugEvent(event, phase, consumed) {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return null;
+      }
+      const list = debugPanelEl.querySelector("#ml-debug-events");
+      if (!list) {
+        return null;
+      }
+      let keyLabel = "";
+      if (event.type === "mousedown" || event.type === "mouseup" || event.type === "click") {
+        const btn = event.button === 2 ? "right" : event.button === 1 ? "middle" : "left";
+        keyLabel = btn + " btn";
+      } else if (event.type === "contextmenu") {
+        keyLabel = "right btn";
+      } else {
+        const parts = [];
+        if (event.metaKey) {
+          parts.push("\u2318");
+        }
+        if (event.ctrlKey) {
+          parts.push("\u2303");
+        }
+        if (event.altKey) {
+          parts.push("\u2325");
+        }
+        if (event.shiftKey) {
+          parts.push("\u21E7");
+        }
+        const k = event.key;
+        if (k && k !== "Meta" && k !== "Control" && k !== "Alt" && k !== "Shift") {
+          const norm = normalizeKeyForStorage(k);
+          if (norm) {
+            const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, norm) ? KEY_GLYPHS[norm] : null;
+            parts.push(glyph !== null ? glyph : norm.length === 1 ? norm.toUpperCase() : norm);
+          } else {
+            parts.push(k);
+          }
+        } else if (k) {
+          const modGlyphs = { "Meta": "\u2318", "Control": "\u2303", "Alt": "\u2325", "Shift": "\u21E7" };
+          parts.push(modGlyphs[k] || k);
+        }
+        keyLabel = parts.join("+") || "?";
+      }
+      const phaseShort = phase.replace("down", "\u2193").replace("up", "\u2191");
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:2px 4px;font-size:11px;font-family:monospace;color:#f8f9fa;border-bottom:1px solid rgba(255,255,255,0.06);";
+      const left = document.createElement("span");
+      left.textContent = `${keyLabel}  ${phaseShort}`;
+      row.appendChild(left);
+      const right = document.createElement("span");
+      right.id = "ml-debug-event-status-" + ++debugEventCounter;
+      if (consumed === true) {
+        right.textContent = "consumed";
+        right.style.color = "#f87171";
+      } else if (consumed === false) {
+        right.textContent = "passed";
+        right.style.color = "#86efac";
+      } else {
+        right.textContent = "\u2026";
+        right.style.color = "rgba(255,255,255,0.4)";
+      }
+      row.appendChild(right);
+      list.insertBefore(row, list.firstChild);
+      while (list.childElementCount > 30) {
+        list.removeChild(list.lastChild);
+      }
+      const fadeDelay = Math.max(0, DEBUG_EVENT_DISPLAY_MS - DEBUG_EVENT_FADEOUT_MS);
+      setTimeout(() => {
+        row.style.animation = `mlDebugEventFadeOut ${DEBUG_EVENT_FADEOUT_MS}ms linear forwards`;
+        setTimeout(() => {
+          if (row.parentNode) {
+            row.remove();
+          }
+        }, DEBUG_EVENT_FADEOUT_MS);
+      }, fadeDelay);
+      return { row, statusEl: right };
+    }
+    function markDebugEventStatus(handle, consumed) {
+      if (!handle || !handle.statusEl) {
+        return;
+      }
+      if (consumed) {
+        handle.statusEl.textContent = "consumed";
+        handle.statusEl.style.color = "#f87171";
+      } else {
+        handle.statusEl.textContent = "passed";
+        handle.statusEl.style.color = "#86efac";
+      }
+    }
+    function updateDebugPanelState() {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return;
+      }
+      const stateEl = debugPanelEl.querySelector("#ml-debug-state");
+      if (stateEl) {
+        let stateStr = "idle";
+        if (recordingAction) {
+          stateStr = `recording: ${ACTION_LABELS[recordingAction] || recordingAction}`;
+        } else if (inferBufferActive) {
+          stateStr = `buffer active (${inferBufferLinks.length} links)`;
+        } else {
+          const advancing = Object.keys(chordProgress).filter((k) => !!chordProgress[k]);
+          if (advancing.length > 0) {
+            stateStr = `chord advancing: ${advancing.join(", ")}`;
+          }
+        }
+        stateEl.textContent = stateStr;
+      }
+      const heldEl = debugPanelEl.querySelector("#ml-debug-held-keys");
+      if (heldEl) {
+        if (pressedKeys.size === 0) {
+          heldEl.textContent = "\u2014";
+        } else {
+          heldEl.textContent = Array.from(pressedKeys).map((k) => {
+            const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, k) ? KEY_GLYPHS[k] : null;
+            return glyph !== null ? glyph : k.length === 1 ? k.toUpperCase() : k;
+          }).join("  ");
+        }
+      }
+    }
+    function setDebugLastAction(label) {
+      if (!debugPanelEl) {
+        return;
+      }
+      const el = debugPanelEl.querySelector("#ml-debug-last-action");
+      if (el) {
+        el.textContent = label;
+      }
+    }
+    function updateDebugCursor() {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return;
+      }
+      const el = debugPanelEl.querySelector("#ml-debug-cursor");
+      if (!el) {
+        return;
+      }
+      try {
+        const target = document.elementFromPoint(mouseX, mouseY);
+        const anchor = target ? target.closest("a") : null;
+        const url = anchor ? anchor.href : window.location.href;
+        const truncUrl = url ? url.substring(0, 70) : "\u2014";
+        const kind = anchor ? "anchor" : "page";
+        el.textContent = `x:${mouseX}  y:${mouseY}  ${kind}: ${truncUrl}`;
+      } catch (e) {
+        el.textContent = `x:${mouseX}  y:${mouseY}`;
+      }
+    }
+    function openDebugPanel() {
+      if (isDebugPanelVisible && debugPanelEl && document.body.contains(debugPanelEl)) {
+        return;
+      }
+      ensureTimerKeyframes();
+      isDebugPanelVisible = true;
+      if (!debugPanelEl) {
+        let sectionLabel = function(text) {
+          const el = document.createElement("div");
+          el.textContent = text;
+          el.style.cssText = "font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);margin:8px 0 2px;";
+          return el;
+        }, infoRow = function(labelText, id) {
+          const row = document.createElement("div");
+          row.style.cssText = "display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);";
+          const lbl = document.createElement("span");
+          lbl.textContent = labelText;
+          lbl.style.cssText = "font-size:10px;color:rgba(255,255,255,0.5);flex-shrink:0;margin-right:6px;";
+          const val = document.createElement("span");
+          val.id = id;
+          val.textContent = "\u2014";
+          val.style.cssText = "font-size:11px;color:#f8f9fa;text-align:right;word-break:break-all;";
+          row.appendChild(lbl);
+          row.appendChild(val);
+          return row;
+        };
+        const panel = document.createElement("div");
+        panel.id = "ml-debug-panel";
+        panel.style.cssText = [
+          "position:fixed",
+          "top:12px",
+          "right:12px",
+          "width:260px",
+          "background:rgba(17,17,27,0.92)",
+          "backdrop-filter:blur(6px)",
+          "border:1px solid rgba(255,255,255,0.15)",
+          "border-radius:8px",
+          "padding:10px 12px",
+          "z-index:1000002",
+          "font-family:sans-serif",
+          "color:#f8f9fa",
+          "box-shadow:0 4px 24px rgba(0,0,0,0.5)",
+          "max-height:80vh",
+          "overflow-y:auto"
+        ].join(";");
+        const header = document.createElement("div");
+        header.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
+        const title = document.createElement("span");
+        title.textContent = "\u{1F527} Debug";
+        title.style.cssText = "font-size:12px;font-weight:700;letter-spacing:0.04em;color:#f8f9fa;";
+        const closeBtn = document.createElement("button");
+        closeBtn.textContent = "\u2715";
+        closeBtn.style.cssText = "background:none;border:none;color:rgba(255,255,255,0.5);font-size:12px;cursor:pointer;padding:0 2px;";
+        closeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          closeDebugPanel();
+        });
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        panel.appendChild(header);
+        panel.appendChild(sectionLabel("State"));
+        panel.appendChild(infoRow("script", "ml-debug-state"));
+        panel.appendChild(infoRow("held keys", "ml-debug-held-keys"));
+        panel.appendChild(infoRow("last action", "ml-debug-last-action"));
+        panel.appendChild(sectionLabel("Cursor"));
+        const cursorRow = document.createElement("div");
+        cursorRow.style.cssText = "padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);";
+        const cursorSpan = document.createElement("span");
+        cursorSpan.id = "ml-debug-cursor";
+        cursorSpan.textContent = "x:\u2014  y:\u2014  target:\u2014";
+        cursorSpan.style.cssText = "font-size:10px;color:rgba(255,255,255,0.7);font-family:monospace;word-break:break-all;";
+        cursorRow.appendChild(cursorSpan);
+        panel.appendChild(cursorRow);
+        panel.appendChild(sectionLabel("Chord timers"));
+        panel.appendChild(createTimerRow("record", "Record pause", "CHORD_RECORD_TIMEOUT_MS", CHORD_RECORD_TIMEOUT_MS));
+        panel.appendChild(createTimerRow("playback", "Playback window", "CHORD_PLAYBACK_TIMEOUT_MS", CHORD_PLAYBACK_TIMEOUT_MS));
+        const evtHeader = document.createElement("div");
+        evtHeader.style.cssText = "display:flex;align-items:center;gap:4px;margin:8px 0 2px;";
+        const evtLabel = document.createElement("span");
+        evtLabel.textContent = "EVENTS";
+        evtLabel.style.cssText = "font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);";
+        const helpBtn = document.createElement("button");
+        helpBtn.textContent = "?";
+        helpBtn.style.cssText = "background:none;border:1px solid rgba(255,255,255,0.3);border-radius:50%;color:rgba(255,255,255,0.5);font-size:9px;width:14px;height:14px;cursor:pointer;line-height:1;padding:0;";
+        helpBtn.title = [
+          "consumed \u2014 script called preventDefault() on this event.",
+          "  The event stops here and is not delivered to the page.",
+          "",
+          "passed \u2014 script let this event through normally.",
+          "",
+          "Mouse down/up events are observed (debug-only listeners);",
+          "  the script never consumes them directly."
+        ].join("\n");
+        evtHeader.appendChild(evtLabel);
+        evtHeader.appendChild(helpBtn);
+        panel.appendChild(evtHeader);
+        const eventList = document.createElement("div");
+        eventList.id = "ml-debug-events";
+        eventList.style.cssText = "max-height:180px;overflow-y:auto;";
+        panel.appendChild(eventList);
+        document.body.appendChild(panel);
+        debugPanelEl = panel;
+      } else {
+        document.body.appendChild(debugPanelEl);
+      }
+      updateDebugPanelState();
+      updateDebugCursor();
+    }
+    function closeDebugPanel() {
+      isDebugPanelVisible = false;
+      if (debugPanelEl && debugPanelEl.parentNode) {
+        debugPanelEl.remove();
+      }
+    }
+    function toggleDebugPanel() {
+      if (!isDebug) {
+        return;
+      }
+      if (isDebugPanelVisible) {
+        closeDebugPanel();
+      } else {
+        openDebugPanel();
+      }
+    }
     document.addEventListener("keydown", (event) => {
-      if (event.key === "z" || event.key === "Z") {
-        isZKeyDown = true;
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      if (event.repeat) {
+        return;
+      }
+      debugLastKeyEventEl = logDebugEvent(event, "keydown", null);
+      updateDebugPanelState();
+    }, true);
+    document.addEventListener("keyup", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      logDebugEvent(event, "keyup", null);
+      updateDebugPanelState();
+    }, true);
+    document.addEventListener("mousedown", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      logDebugEvent(event, "mousedown", false);
+    }, true);
+    document.addEventListener("mouseup", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      logDebugEvent(event, "mouseup", false);
+    }, true);
+    document.addEventListener("click", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      debugLastClickEventEl = logDebugEvent(event, "click", null);
+    }, true);
+    document.addEventListener("contextmenu", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      debugLastClickEventEl = logDebugEvent(event, "contextmenu", null);
+    }, true);
+    log("Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)");
+    document.addEventListener("keydown", (event) => {
+      const storageKey = normalizeKeyForStorage(event.key);
+      if (storageKey) {
+        pressedKeys.add(storageKey);
       }
     }, true);
     document.addEventListener("keyup", (event) => {
-      if (event.key === "z" || event.key === "Z") {
-        isZKeyDown = false;
+      const storageKey = normalizeKeyForStorage(event.key);
+      if (storageKey) {
+        pressedKeys.delete(storageKey);
       }
     }, true);
     log("Did add keydown listener for key tracking");
@@ -5817,26 +7899,33 @@ Open debugger to inspect?`;
     log("Will add keyup listener to track key releases");
     document.addEventListener("keyup", (event) => {
       logFunctionBegin("keyup tracker");
-      log(`Key released: ${event.key}, altKey=${event.altKey}`);
-      console.log(`[MARKDOWN_LINKER_DEBUG] KeyUp: released=${event.key}, altKey=${event.altKey}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
-      const isAltReleasing = event.key === "Alt";
-      const isZReleasing = event.key === "z" || event.key === "Z";
-      const wasAltZActive = isAltZBufferActive;
-      log(`Alt releasing: ${isAltReleasing}, Z releasing: ${isZReleasing}, Was Alt+Z active: ${wasAltZActive}`);
-      if (wasAltZActive && (isAltReleasing || isZReleasing)) {
-        log(`Alt+Z was deactivated, processing buffer with ${altZClickBuffer.length} buffered links`);
-        isAltZBufferActive = false;
-        if (altZClickBuffer.length > 0) {
-          log("Will compile buffered links into markdown list");
-          compileAndCopyBufferedLinks(altZClickBuffer);
-          const count = altZClickBuffer.length;
-          altZClickBuffer = [];
-          log(`Did process ${count} links and clear buffer`);
-        } else {
-          log("Buffer is empty, nothing to copy");
+      if (!inferBufferActive) {
+        logFunctionEnd("keyup tracker");
+        return;
+      }
+      log(`Key released during buffer: key=${event.key}, links=${inferBufferLinks.length}`);
+      let shouldFinalize = false;
+      if (event.key === "Meta" && inferBufferHoldMeta) {
+        shouldFinalize = true;
+      }
+      if (event.key === "Control" && inferBufferHoldCtrl) {
+        shouldFinalize = true;
+      }
+      if (event.key === "Alt" && inferBufferHoldAlt) {
+        shouldFinalize = true;
+      }
+      if (event.key === "Shift" && inferBufferHoldShift) {
+        shouldFinalize = true;
+      }
+      if (!shouldFinalize) {
+        const releasedKey = normalizeKeyForStorage(event.key);
+        if (releasedKey && inferBufferHoldKeys.has(releasedKey)) {
+          shouldFinalize = true;
         }
-      } else {
-        log("Alt+Z was not active or combo still active, skipping buffer processing");
+      }
+      if (shouldFinalize) {
+        log(`Hold key released (${event.key}), finalizing buffer`);
+        finalizeInferBuffer();
       }
       logFunctionEnd("keyup tracker");
     }, false);
@@ -5849,7 +7938,7 @@ Open debugger to inspect?`;
     document.addEventListener("contextmenu", handleContextMenu, true);
     log("Did register contextmenu listener");
     log("All event listeners registered");
-    log("Triggers: Alt+Click (show menu), Alt+Z+Click (auto-infer), Alt+Right-Click, or Alt+M");
+    log("Triggers (configurable): hover+V = menu, hover+B = quiet copy, hold Z + click\u2026 = buffer list");
     log("Script initialization complete");
   })();
 })();
