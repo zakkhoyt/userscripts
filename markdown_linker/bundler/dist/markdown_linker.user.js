@@ -3813,6 +3813,10 @@ ${textLink}`;
     ];
     let captureMode = CAPTURE_MODE_OPTIONS[0].id;
     let captureMenuCommandId = null;
+    const CHORD_RECORD_TIMEOUT_MS = 500;
+    const CHORD_PLAYBACK_TIMEOUT_MS = 1500;
+    const DEBUG_EVENT_DISPLAY_MS = 1500;
+    const DEBUG_EVENT_FADEOUT_MS = 300;
     const TRIGGERS_PREF_KEY = "markdown_linker.triggers";
     const DEFAULT_TRIGGERS = {
       menu: [{ modifiers: {}, keys: ["v"], requiresClick: false }],
@@ -3821,7 +3825,9 @@ ${textLink}`;
       // hover + B -> copy one link
       inferBuffer: [{ modifiers: {}, keys: ["z"], requiresClick: true }],
       // hold Z + click… -> buffer list
-      openSettings: []
+      openSettings: [],
+      // no default — user records their own
+      toggleDebugPanel: []
       // no default — user records their own
     };
     let triggers = cloneTriggers(DEFAULT_TRIGGERS);
@@ -5637,9 +5643,10 @@ Open debugger to inspect?`;
       log(`Will create notification with message: "${message}"`);
       const notification = document.createElement("div");
       notification.textContent = message;
+      const debugPanelHeight = isDebugPanelVisible && debugPanelEl ? debugPanelEl.offsetHeight : 0;
+      const notifTop = 20 + (debugPanelHeight > 0 ? debugPanelHeight + 8 : 0);
       notification.style.cssText = `
             position: fixed;
-            top: 20px;
             right: 20px;
             background: #4CAF50;
             color: white;
@@ -5652,6 +5659,7 @@ Open debugger to inspect?`;
             white-space: pre-line;
             animation: mdLinkerFadeIn 0.3s, mdLinkerFadeOut 0.3s 2.7s;
         `;
+      notification.style.top = notifTop + "px";
       log("Will append notification to body");
       document.body.appendChild(notification);
       activeNotification = notification;
@@ -6441,14 +6449,30 @@ ${document.documentElement.outerHTML}`;
       log("Did clear target variables");
       logFunctionEnd("removeMenu");
     }
+    function cloneTerm(term) {
+      const t = {
+        modifiers: Object.assign({}, term.modifiers),
+        keys: (term.keys || []).slice(),
+        requiresClick: !!term.requiresClick
+      };
+      if (term.clickCount != null) {
+        t.clickCount = term.clickCount;
+      }
+      if (term.rightClick) {
+        t.rightClick = true;
+      }
+      return t;
+    }
+    function cloneBinding(binding) {
+      if (binding.terms) {
+        return { modifiers: {}, keys: [], requiresClick: false, terms: binding.terms.map(cloneTerm) };
+      }
+      return cloneTerm(binding);
+    }
     function cloneTriggers(source) {
       const out = {};
       Object.keys(source || {}).forEach((action) => {
-        out[action] = (source[action] || []).map((binding) => ({
-          modifiers: Object.assign({}, binding.modifiers),
-          keys: (binding.keys || []).slice(),
-          requiresClick: !!binding.requiresClick
-        }));
+        out[action] = (source[action] || []).map(cloneBinding);
       });
       return out;
     }
@@ -6460,7 +6484,51 @@ ${document.documentElement.outerHTML}`;
         shift: !!event.shiftKey
       };
     }
+    const KEY_GLYPHS = {
+      " ": "\u2423",
+      "escape": "\u238B",
+      "tab": "\u21E5",
+      "enter": "\u21A9",
+      "backspace": "\u232B",
+      "delete": "\u2326",
+      "pageup": "\u21DE",
+      "pagedown": "\u21DF",
+      "home": "\u2196",
+      "end": "\u2198",
+      "arrowup": "\u2191",
+      "arrowdown": "\u2193",
+      "arrowleft": "\u2190",
+      "arrowright": "\u2192"
+    };
+    function normalizeKeyForStorage(eventKey) {
+      if (!eventKey || eventKey === "Unidentified") {
+        return null;
+      }
+      if (eventKey === "Shift" || eventKey === "Control" || eventKey === "Alt" || eventKey === "Meta") {
+        return null;
+      }
+      if (eventKey === "Escape") {
+        return null;
+      }
+      const lower = eventKey.toLowerCase();
+      if (eventKey.length === 1) {
+        return lower;
+      }
+      if (Object.prototype.hasOwnProperty.call(KEY_GLYPHS, lower)) {
+        return lower;
+      }
+      if (/^f([1-9]|1[0-9])$/.test(lower)) {
+        return lower;
+      }
+      return null;
+    }
     function bindingHasInput(binding) {
+      if (binding.terms) {
+        return binding.terms.length > 0;
+      }
+      if (binding.requiresClick) {
+        return true;
+      }
       const m = binding.modifiers || {};
       return binding.keys && binding.keys.length > 0 || !!(m.meta || m.ctrl || m.alt || m.shift);
     }
@@ -6480,13 +6548,91 @@ ${document.documentElement.outerHTML}`;
       }
       return true;
     }
-    function actionMatchesClick(actionName, state) {
+    function actionMatchesClick(actionName, state, clickCount, isRightClick) {
       const list = triggers[actionName] || [];
-      return list.some((binding) => binding && binding.requiresClick && matchesBinding(binding, state));
+      const n = clickCount || 1;
+      const right = !!isRightClick;
+      return list.some((binding) => {
+        if (!binding) {
+          return false;
+        }
+        if (binding.terms) {
+          const progress = chordProgress[actionName];
+          const lastIdx = binding.terms.length - 1;
+          if (!progress || progress.nextTermIdx !== lastIdx) {
+            return false;
+          }
+          const lastTerm = binding.terms[lastIdx];
+          if (!lastTerm || !lastTerm.requiresClick) {
+            return false;
+          }
+          if (!matchesBinding(lastTerm, state)) {
+            return false;
+          }
+          if ((lastTerm.clickCount || 1) !== n) {
+            return false;
+          }
+          return !!lastTerm.rightClick === right;
+        }
+        if (!binding.requiresClick) {
+          return false;
+        }
+        if (!matchesBinding(binding, state)) {
+          return false;
+        }
+        if ((binding.clickCount || 1) !== n) {
+          return false;
+        }
+        return !!binding.rightClick === right;
+      });
     }
     function keyboardActionTriggered(actionName, state, justPressedKey) {
       const list = triggers[actionName] || [];
-      return list.some((binding) => binding && !binding.requiresClick && (binding.keys || []).indexOf(justPressedKey) !== -1 && matchesBinding(binding, state));
+      return list.some((binding) => binding && !binding.requiresClick && !binding.terms && (binding.keys || []).indexOf(justPressedKey) !== -1 && matchesBinding(binding, state));
+    }
+    const chordProgress = {};
+    function clearChordProgress(actionName) {
+      const p = chordProgress[actionName];
+      if (p && p.timer) {
+        clearTimeout(p.timer);
+      }
+      delete chordProgress[actionName];
+      debugTimerStop("playback");
+    }
+    function chordActionResult(actionName, state, justPressedKey) {
+      const list = triggers[actionName] || [];
+      const progress = chordProgress[actionName];
+      for (let bi = 0; bi < list.length; bi++) {
+        const binding = list[bi];
+        if (!binding || !binding.terms || binding.terms.length === 0) {
+          continue;
+        }
+        const expectedIdx = progress && progress.bindingIndex === bi ? progress.nextTermIdx : 0;
+        const term = binding.terms[expectedIdx];
+        if (!term || term.requiresClick) {
+          continue;
+        }
+        if ((term.keys || []).indexOf(justPressedKey) === -1) {
+          continue;
+        }
+        if (!matchesBinding(term, state)) {
+          continue;
+        }
+        clearChordProgress(actionName);
+        if (expectedIdx + 1 >= binding.terms.length) {
+          return "complete";
+        }
+        const timer = setTimeout(() => {
+          delete chordProgress[actionName];
+        }, CHORD_PLAYBACK_TIMEOUT_MS);
+        chordProgress[actionName] = { bindingIndex: bi, nextTermIdx: expectedIdx + 1, timer };
+        debugTimerStart("playback", CHORD_PLAYBACK_TIMEOUT_MS);
+        return "advance";
+      }
+      if (progress) {
+        clearChordProgress(actionName);
+      }
+      return null;
     }
     function loadTriggers() {
       if (typeof GM_getValue === "function") {
@@ -6517,17 +6663,23 @@ ${document.documentElement.outerHTML}`;
       menu: "Open menu",
       inferQuiet: "Quiet copy (no menu)",
       inferBuffer: "Buffer links (hold + click)",
-      openSettings: "Open settings"
+      openSettings: "Open settings",
+      toggleDebugPanel: "Toggle debug panel"
     };
     let settingsPanelEl = null;
     let settingsBodyEl = null;
     let recordingAction = null;
     let recordOverlayEl = null;
-    let recordModifiers = null;
-    let recordKeys = null;
-    function formatBinding(binding) {
+    let recordTerms = [];
+    let recordCurrentModifiers = null;
+    let recordCurrentKeys = null;
+    let recordCurrentClickCount = 0;
+    let recordCurrentRightClick = false;
+    let recordChordTimer = null;
+    let recordClickTimer = null;
+    function formatTerm(term) {
       const parts = [];
-      const m = binding.modifiers || {};
+      const m = term.modifiers || {};
       if (m.meta) {
         parts.push("\u2318");
       }
@@ -6540,12 +6692,30 @@ ${document.documentElement.outerHTML}`;
       if (m.shift) {
         parts.push("\u21E7");
       }
-      (binding.keys || []).forEach((key) => parts.push(key.toUpperCase()));
-      let label = parts.join(" + ") || "(unset)";
-      if (binding.requiresClick) {
-        label = `${label} + click`;
+      (term.keys || []).forEach((key) => {
+        const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, key) ? KEY_GLYPHS[key] : null;
+        if (glyph !== null) {
+          parts.push(glyph);
+        } else if (key.length === 1) {
+          parts.push(key.toUpperCase());
+        } else {
+          parts.push(key.charAt(0).toUpperCase() + key.slice(1));
+        }
+      });
+      let label = parts.join("+");
+      if (term.requiresClick) {
+        const n = term.clickCount || 1;
+        const clickLabel = term.rightClick ? n >= 2 ? "double-right-click" : "right-click" : n === 2 ? "double-click" : n >= 3 ? `${n}\xD7click` : "click";
+        label = label ? `${label}+${clickLabel}` : clickLabel;
       }
-      return label;
+      return label || "(none)";
+    }
+    function formatBinding(binding) {
+      if (binding.terms && binding.terms.length > 0) {
+        const termLabels = binding.terms.map(formatTerm);
+        return termLabels.length >= 2 ? `[${termLabels.join(" ")}]` : termLabels[0] || "(none)";
+      }
+      return formatTerm(binding);
     }
     function formatActionBindings(actionName) {
       const list = triggers[actionName] || [];
@@ -6554,13 +6724,39 @@ ${document.documentElement.outerHTML}`;
     function styleSettingsButton(button) {
       button.style.cssText = "margin-left:8px;padding:3px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#f8f9fa;font-size:12px;cursor:pointer;";
     }
+    function resetCurrentTerm() {
+      recordCurrentModifiers = { meta: false, ctrl: false, alt: false, shift: false };
+      recordCurrentKeys = /* @__PURE__ */ new Set();
+      recordCurrentClickCount = 0;
+      recordCurrentRightClick = false;
+    }
+    function clearRecordTimers() {
+      if (recordChordTimer) {
+        clearTimeout(recordChordTimer);
+        recordChordTimer = null;
+      }
+      if (recordClickTimer) {
+        clearTimeout(recordClickTimer);
+        recordClickTimer = null;
+      }
+      debugTimerStop("record");
+    }
     function updateRecordOverlay() {
       if (!recordOverlayEl) {
         return;
       }
       const preview = recordOverlayEl.querySelector("#markdown-linker-record-preview");
-      if (preview) {
-        preview.textContent = `${formatBinding({ modifiers: recordModifiers, keys: Array.from(recordKeys) })} \u2026`;
+      if (!preview) {
+        return;
+      }
+      const completedLabels = recordTerms.map(formatBinding);
+      const hasCurrent = recordCurrentKeys && recordCurrentKeys.size > 0;
+      const currentLabel = hasCurrent ? formatTerm({ modifiers: recordCurrentModifiers || {}, keys: Array.from(recordCurrentKeys) }) + " \u2026" : "";
+      const allParts = completedLabels.concat(currentLabel ? [currentLabel] : completedLabels.length === 0 ? ["\u2026"] : []);
+      if (allParts.length >= 2) {
+        preview.textContent = `[${allParts.join(" ")}]`;
+      } else {
+        preview.textContent = allParts[0] || "\u2026";
       }
     }
     function hideRecordOverlay() {
@@ -6580,7 +6776,7 @@ ${document.documentElement.outerHTML}`;
       heading.textContent = `Recording: ${ACTION_LABELS[actionName] || actionName}`;
       heading.style.cssText = "font-size:18px;font-weight:600;margin-bottom:8px;";
       const instr = document.createElement("div");
-      instr.textContent = "Press your keys, then click anywhere \u2014 or just release the keys for a keyboard-only trigger. Esc to cancel.";
+      instr.textContent = "Press keys and release to end each term; pause 500 ms to commit the chord. Click or right-click ends immediately. Esc cancels.";
       instr.style.cssText = "font-size:13px;opacity:0.8;margin-bottom:12px;";
       const preview = document.createElement("div");
       preview.id = "markdown-linker-record-preview";
@@ -6594,53 +6790,44 @@ ${document.documentElement.outerHTML}`;
       recordOverlayEl = overlay;
     }
     function accumulateRecordModifiers(event) {
-      const state = bindingState(event);
-      recordModifiers.meta = recordModifiers.meta || state.meta;
-      recordModifiers.ctrl = recordModifiers.ctrl || state.ctrl;
-      recordModifiers.alt = recordModifiers.alt || state.alt;
-      recordModifiers.shift = recordModifiers.shift || state.shift;
-    }
-    function recordKeydownHandler(event) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.key === "Escape") {
-        stopRecording();
+      if (!recordCurrentModifiers) {
         return;
       }
-      accumulateRecordModifiers(event);
-      if (event.key && event.key.length === 1) {
-        recordKeys.add(event.key.toLowerCase());
-      }
-      updateRecordOverlay();
+      const state = bindingState(event);
+      recordCurrentModifiers.meta = recordCurrentModifiers.meta || state.meta;
+      recordCurrentModifiers.ctrl = recordCurrentModifiers.ctrl || state.ctrl;
+      recordCurrentModifiers.alt = recordCurrentModifiers.alt || state.alt;
+      recordCurrentModifiers.shift = recordCurrentModifiers.shift || state.shift;
     }
-    function recordKeyupHandler(event) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (recordKeys && recordKeys.size > 0) {
-        commitRecording(false);
-      }
+    function captureTerm(requiresClick, clickCount, rightClick) {
+      return {
+        modifiers: {
+          meta: !!(recordCurrentModifiers && recordCurrentModifiers.meta),
+          ctrl: !!(recordCurrentModifiers && recordCurrentModifiers.ctrl),
+          alt: !!(recordCurrentModifiers && recordCurrentModifiers.alt),
+          shift: !!(recordCurrentModifiers && recordCurrentModifiers.shift)
+        },
+        keys: Array.from(recordCurrentKeys || []),
+        requiresClick: !!requiresClick,
+        ...requiresClick && clickCount && clickCount > 1 ? { clickCount } : {},
+        ...requiresClick && rightClick ? { rightClick: true } : {}
+      };
     }
-    function recordClickHandler(event) {
-      event.preventDefault();
-      event.stopPropagation();
-      accumulateRecordModifiers(event);
-      commitRecording(true);
-    }
-    function commitRecording(requiresClick) {
+    function commitChord() {
       const action = recordingAction;
       if (!action) {
         return;
       }
-      const binding = {
-        modifiers: {
-          meta: !!recordModifiers.meta,
-          ctrl: !!recordModifiers.ctrl,
-          alt: !!recordModifiers.alt,
-          shift: !!recordModifiers.shift
-        },
-        keys: Array.from(recordKeys),
-        requiresClick: !!requiresClick
-      };
+      if (recordTerms.length === 0) {
+        stopRecording();
+        return;
+      }
+      let binding;
+      if (recordTerms.length === 1) {
+        binding = recordTerms[0];
+      } else {
+        binding = { modifiers: {}, keys: [], requiresClick: false, terms: recordTerms.slice() };
+      }
       if (!bindingHasInput(binding)) {
         stopRecording();
         return;
@@ -6650,24 +6837,88 @@ ${document.documentElement.outerHTML}`;
       log(`Recorded ${action} trigger: ${formatBinding(binding)}`);
       stopRecording();
     }
+    function recordKeydownHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        stopRecording();
+        return;
+      }
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      const storageKey = normalizeKeyForStorage(event.key);
+      if (storageKey) {
+        recordCurrentKeys.add(storageKey);
+      }
+      updateRecordOverlay();
+    }
+    function recordKeyupHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (recordCurrentKeys && recordCurrentKeys.size > 0) {
+        recordTerms.push(captureTerm(false));
+        resetCurrentTerm();
+        recordChordTimer = setTimeout(() => {
+          recordChordTimer = null;
+          commitChord();
+        }, CHORD_RECORD_TIMEOUT_MS);
+        debugTimerStart("record", CHORD_RECORD_TIMEOUT_MS);
+        updateRecordOverlay();
+        updateDebugPanelState();
+      }
+    }
+    function recordClickHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      recordCurrentClickCount++;
+      recordClickTimer = setTimeout(() => {
+        recordClickTimer = null;
+        recordTerms.push(captureTerm(true, recordCurrentClickCount, false));
+        resetCurrentTerm();
+        commitChord();
+      }, 300);
+      updateRecordOverlay();
+    }
+    function recordContextMenuHandler(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearRecordTimers();
+      accumulateRecordModifiers(event);
+      recordCurrentClickCount++;
+      recordCurrentRightClick = true;
+      recordClickTimer = setTimeout(() => {
+        recordClickTimer = null;
+        recordTerms.push(captureTerm(true, recordCurrentClickCount, true));
+        resetCurrentTerm();
+        commitChord();
+      }, 300);
+      updateRecordOverlay();
+    }
     function startRecording(actionName) {
       recordingAction = actionName;
-      recordModifiers = { meta: false, ctrl: false, alt: false, shift: false };
-      recordKeys = /* @__PURE__ */ new Set();
+      recordTerms = [];
+      resetCurrentTerm();
       window.addEventListener("keydown", recordKeydownHandler, true);
       window.addEventListener("keyup", recordKeyupHandler, true);
       window.addEventListener("click", recordClickHandler, true);
+      window.addEventListener("contextmenu", recordContextMenuHandler, true);
       showRecordOverlay(actionName);
+      updateDebugPanelState();
     }
     function stopRecording() {
+      clearRecordTimers();
       window.removeEventListener("keydown", recordKeydownHandler, true);
       window.removeEventListener("keyup", recordKeyupHandler, true);
       window.removeEventListener("click", recordClickHandler, true);
+      window.removeEventListener("contextmenu", recordContextMenuHandler, true);
       recordingAction = null;
-      recordModifiers = null;
-      recordKeys = null;
+      recordTerms = [];
+      resetCurrentTerm();
       hideRecordOverlay();
       refreshSettingsPanel();
+      updateDebugPanelState();
     }
     function renderSettingsBody(body) {
       body.textContent = "";
@@ -6828,23 +7079,25 @@ ${document.documentElement.outerHTML}`;
       logFunctionBegin("handleClick");
       log("Click event received");
       const clickState = bindingState(event);
-      const menuClick = actionMatchesClick("menu", clickState);
-      const bufferClick = actionMatchesClick("inferBuffer", clickState);
-      log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
+      const menuClick = actionMatchesClick("menu", clickState, event.detail || 1, false);
+      const bufferClick = actionMatchesClick("inferBuffer", clickState, event.detail || 1, false);
+      log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${inferBufferActive}, buffer size=${inferBufferLinks.length}`);
       if (!menuClick && !bufferClick) {
         log("No click trigger matched, returning");
+        markDebugEventStatus(debugLastClickEventEl, false);
         logFunctionEnd("handleClick");
         return;
       }
       log("Will prevent default and stop propagation");
       event.preventDefault();
       event.stopPropagation();
+      markDebugEventStatus(debugLastClickEventEl, true);
       log("Did prevent default and stop propagation");
       const isAutoInferMode = bufferClick;
       log(`Is auto-infer (buffer) mode: ${isAutoInferMode}`);
-      if (isAutoInferMode && !isAltZBufferActive) {
-        isAltZBufferActive = true;
-        log("Activated Alt+Z buffer mode");
+      if (isAutoInferMode && !inferBufferActive) {
+        activateInferBuffer(event);
+        setDebugLastAction("inferBuffer activated");
       }
       log("Will find closest anchor element");
       const anchor = event.target.closest("a");
@@ -6861,8 +7114,8 @@ ${document.documentElement.outerHTML}`;
             log("Will show click feedback animation");
             showClickFeedback(event.clientX, event.clientY);
             log("Did show click feedback animation");
-            altZClickBuffer.push({ url: targetUrl, anchor });
-            log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+            inferBufferLinks.push({ url: targetUrl, anchor });
+            log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
           } else {
             log("In normal mode, will create menu for anchor");
             if (maybeAutoCopySelection(false, targetUrl)) {
@@ -6882,8 +7135,8 @@ ${document.documentElement.outerHTML}`;
             log("Will show click feedback animation");
             showClickFeedback(event.clientX, event.clientY);
             log("Did show click feedback animation");
-            altZClickBuffer.push({ url: targetUrl, anchor: null });
-            log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+            inferBufferLinks.push({ url: targetUrl, anchor: null });
+            log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
           } else {
             log("In normal mode, will create menu for page (fallback)");
             if (maybeAutoCopySelection(false, targetUrl)) {
@@ -6904,8 +7157,8 @@ ${document.documentElement.outerHTML}`;
           log("Will show click feedback animation");
           showClickFeedback(event.clientX, event.clientY);
           log("Did show click feedback animation");
-          altZClickBuffer.push({ url: targetUrl, anchor: null });
-          log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+          inferBufferLinks.push({ url: targetUrl, anchor: null });
+          log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
         } else {
           log("In normal mode, will create menu for page");
           if (maybeAutoCopySelection(false, targetUrl)) {
@@ -6922,14 +7175,16 @@ ${document.documentElement.outerHTML}`;
       logFunctionBegin("handleContextMenu");
       log("Context menu (right-click) event received");
       const contextState = bindingState(event);
-      if (!actionMatchesClick("menu", contextState)) {
+      if (!actionMatchesClick("menu", contextState, event.detail || 1, true)) {
         log("No menu trigger matched on right-click, returning");
+        markDebugEventStatus(debugLastClickEventEl, false);
         logFunctionEnd("handleContextMenu");
         return;
       }
       log("Will prevent default and stop propagation");
       event.preventDefault();
       event.stopPropagation();
+      markDebugEventStatus(debugLastClickEventEl, true);
       log("Did prevent default and stop propagation");
       log("Will find closest anchor element");
       const anchor = event.target.closest("a");
@@ -7016,11 +7271,17 @@ ${document.documentElement.outerHTML}`;
       if (event.repeat) {
         return;
       }
-      const justPressedKey = event.key && event.key.length === 1 ? event.key.toLowerCase() : null;
+      const justPressedKey = normalizeKeyForStorage(event.key);
       const keyState = bindingState(event);
-      const isMenuKey = !!justPressedKey && keyboardActionTriggered("menu", keyState, justPressedKey);
-      const isInferKey = !!justPressedKey && keyboardActionTriggered("inferQuiet", keyState, justPressedKey);
-      const isSettingsKey = !!justPressedKey && keyboardActionTriggered("openSettings", keyState, justPressedKey);
+      const menuChordResult = justPressedKey ? chordActionResult("menu", keyState, justPressedKey) : null;
+      const inferChordResult = justPressedKey ? chordActionResult("inferQuiet", keyState, justPressedKey) : null;
+      const settingsChordResult = justPressedKey ? chordActionResult("openSettings", keyState, justPressedKey) : null;
+      const debugPanelChordResult = justPressedKey ? chordActionResult("toggleDebugPanel", keyState, justPressedKey) : null;
+      const isMenuKey = !!justPressedKey && (keyboardActionTriggered("menu", keyState, justPressedKey) || menuChordResult === "complete");
+      const isInferKey = !!justPressedKey && (keyboardActionTriggered("inferQuiet", keyState, justPressedKey) || inferChordResult === "complete");
+      const isSettingsKey = !!justPressedKey && (keyboardActionTriggered("openSettings", keyState, justPressedKey) || settingsChordResult === "complete");
+      const isDebugPanelKey = !!justPressedKey && (keyboardActionTriggered("toggleDebugPanel", keyState, justPressedKey) || debugPanelChordResult === "complete");
+      const isChordAdvancing = menuChordResult === "advance" || inferChordResult === "advance" || settingsChordResult === "advance" || debugPanelChordResult === "advance";
       if (isSettingsKey) {
         if (isInEditableContext(event)) {
           return;
@@ -7028,6 +7289,8 @@ ${document.documentElement.outerHTML}`;
         event.preventDefault();
         event.stopPropagation();
         pressedKeys.clear();
+        markDebugEventStatus(debugLastKeyEventEl, true);
+        setDebugLastAction("settings toggled");
         const panelIsOpen = settingsPanelEl && document.body.contains(settingsPanelEl);
         if (panelIsOpen) {
           closeTriggerSettings();
@@ -7036,27 +7299,54 @@ ${document.documentElement.outerHTML}`;
         }
         return;
       }
+      if (isDebugPanelKey) {
+        if (!isDebug) {
+          markDebugEventStatus(debugLastKeyEventEl, false);
+          return;
+        }
+        if (isInEditableContext(event)) {
+          markDebugEventStatus(debugLastKeyEventEl, false);
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        pressedKeys.clear();
+        markDebugEventStatus(debugLastKeyEventEl, true);
+        setDebugLastAction("debug panel toggled");
+        toggleDebugPanel();
+        return;
+      }
+      if (isChordAdvancing) {
+        event.preventDefault();
+        event.stopPropagation();
+        markDebugEventStatus(debugLastKeyEventEl, true);
+        return;
+      }
       if (isMenuKey || isInferKey) {
         logFunctionBegin("handleKeydown");
         log(`Keyboard trigger detected (key=${justPressedKey}, menu=${isMenuKey}, inferQuiet=${isInferKey})`);
         if (isInEditableContext(event)) {
           log("In editable context (input/textarea/contenteditable), skipping keyboard trigger");
+          markDebugEventStatus(debugLastKeyEventEl, false);
           logFunctionEnd("handleKeydown");
           return;
         }
         log("Will prevent default and stop propagation");
         event.preventDefault();
         event.stopPropagation();
+        markDebugEventStatus(debugLastKeyEventEl, true);
         log("Did prevent default and stop propagation");
         if (isInferKey) {
           const inferHovered = document.elementFromPoint(mouseX, mouseY);
           const inferAnchor = inferHovered ? inferHovered.closest("a") : null;
           const inferRawUrl = inferAnchor ? extractUrlFromAnchor(inferAnchor, event) : window.location.href;
           log("Keyboard auto-infer: copying single link without menu");
+          setDebugLastAction("inferQuiet fired (key: " + justPressedKey + ")");
           compileAndCopyBufferedLinks([{ url: inferRawUrl, anchor: inferAnchor }]);
           logFunctionEnd("handleKeydown");
           return;
         }
+        setDebugLastAction("menu fired (key: " + justPressedKey + ")");
         log(`Will check element at mouse position (${mouseX}, ${mouseY})`);
         const hoveredElement = document.elementFromPoint(mouseX, mouseY);
         log(`Found element: ${hoveredElement ? hoveredElement.tagName : "null"}`);
@@ -7104,6 +7394,8 @@ ${document.documentElement.outerHTML}`;
           createMenu(mouseX, mouseY, false);
         }
         logFunctionEnd("handleKeydown");
+      } else {
+        markDebugEventStatus(debugLastKeyEventEl, false);
       }
     }
     let mouseX = 0;
@@ -7112,21 +7404,492 @@ ${document.documentElement.outerHTML}`;
     document.addEventListener("mousemove", (event) => {
       mouseX = event.clientX;
       mouseY = event.clientY;
+      if (isDebugPanelVisible && !debugCursorThrottle) {
+        debugCursorThrottle = setTimeout(() => {
+          debugCursorThrottle = null;
+          updateDebugCursor();
+        }, 100);
+      }
     });
     log("Did add mousemove listener");
     const pressedKeys = /* @__PURE__ */ new Set();
-    let altZClickBuffer = [];
-    let isAltZBufferActive = false;
-    log("Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)");
-    let isZKeyDown = false;
+    let inferBufferLinks = [];
+    let inferBufferActive = false;
+    let inferBufferHoldMeta = false;
+    let inferBufferHoldCtrl = false;
+    let inferBufferHoldAlt = false;
+    let inferBufferHoldShift = false;
+    let inferBufferHoldKeys = /* @__PURE__ */ new Set();
+    function activateInferBuffer(clickEvent) {
+      inferBufferActive = true;
+      inferBufferLinks = [];
+      inferBufferHoldMeta = !!(clickEvent && clickEvent.metaKey);
+      inferBufferHoldCtrl = !!(clickEvent && clickEvent.ctrlKey);
+      inferBufferHoldAlt = !!(clickEvent && clickEvent.altKey);
+      inferBufferHoldShift = !!(clickEvent && clickEvent.shiftKey);
+      inferBufferHoldKeys = new Set(pressedKeys);
+      log(`Infer buffer activated. Hold: meta=${inferBufferHoldMeta}, ctrl=${inferBufferHoldCtrl}, alt=${inferBufferHoldAlt}, shift=${inferBufferHoldShift}, keys=[${[...inferBufferHoldKeys].join(",")}]`);
+      updateDebugPanelState();
+    }
+    function finalizeInferBuffer() {
+      if (!inferBufferActive) {
+        return;
+      }
+      inferBufferActive = false;
+      const links = inferBufferLinks;
+      inferBufferLinks = [];
+      inferBufferHoldKeys = /* @__PURE__ */ new Set();
+      inferBufferHoldMeta = false;
+      inferBufferHoldCtrl = false;
+      inferBufferHoldAlt = false;
+      inferBufferHoldShift = false;
+      updateDebugPanelState();
+      if (links.length > 0) {
+        log(`Finalizing infer buffer with ${links.length} links`);
+        setDebugLastAction("inferBuffer finalized (" + links.length + " links)");
+        compileAndCopyBufferedLinks(links);
+      } else {
+        log("Infer buffer finalized (empty, nothing to copy)");
+      }
+    }
+    let isDebugPanelVisible = false;
+    let debugPanelEl = null;
+    let debugLastKeyEventEl = null;
+    let debugLastClickEventEl = null;
+    let debugCursorThrottle = null;
+    let debugEventCounter = 0;
+    function debugTimerStart(timerId, durationMs) {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return;
+      }
+      const ring = debugPanelEl.querySelector("#ml-debug-ring-" + timerId);
+      const fill = debugPanelEl.querySelector("#ml-debug-fill-" + timerId);
+      if (!ring || !fill) {
+        return;
+      }
+      fill.style.fill = "rgba(239,68,68,0.55)";
+      ring.style.animation = "none";
+      void ring.getBoundingClientRect();
+      ring.style.animationDuration = durationMs + "ms";
+      ring.style.animation = `mlTimerRing ${durationMs}ms linear forwards`;
+    }
+    function debugTimerStop(timerId) {
+      if (!debugPanelEl) {
+        return;
+      }
+      const ring = debugPanelEl.querySelector("#ml-debug-ring-" + timerId);
+      const fill = debugPanelEl.querySelector("#ml-debug-fill-" + timerId);
+      if (!ring) {
+        return;
+      }
+      ring.style.animation = "none";
+      if (fill) {
+        fill.style.fill = "transparent";
+      }
+    }
+    function createTimerSvg(timerId) {
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("width", "36");
+      svg.setAttribute("height", "36");
+      svg.style.cssText = "flex-shrink:0;";
+      const track = document.createElementNS(ns, "circle");
+      track.setAttribute("cx", "18");
+      track.setAttribute("cy", "18");
+      track.setAttribute("r", "13");
+      track.setAttribute("fill", "none");
+      track.setAttribute("stroke", "rgba(255,255,255,0.2)");
+      track.setAttribute("stroke-width", "4");
+      const fill = document.createElementNS(ns, "circle");
+      fill.id = "ml-debug-fill-" + timerId;
+      fill.setAttribute("cx", "18");
+      fill.setAttribute("cy", "18");
+      fill.setAttribute("r", "11");
+      fill.setAttribute("fill", "transparent");
+      const circ = 2 * Math.PI * 13;
+      const ring = document.createElementNS(ns, "circle");
+      ring.id = "ml-debug-ring-" + timerId;
+      ring.setAttribute("cx", "18");
+      ring.setAttribute("cy", "18");
+      ring.setAttribute("r", "13");
+      ring.setAttribute("fill", "none");
+      ring.setAttribute("stroke", "rgba(255,255,255,0.9)");
+      ring.setAttribute("stroke-width", "4");
+      ring.setAttribute("stroke-dasharray", String(circ));
+      ring.setAttribute("stroke-dashoffset", "0");
+      ring.style.cssText = "transform-origin:18px 18px;transform:rotate(-90deg);";
+      svg.appendChild(track);
+      svg.appendChild(fill);
+      svg.appendChild(ring);
+      return svg;
+    }
+    function createTimerRow(timerId, title, constName, constValue) {
+      const row = document.createElement("div");
+      row.style.cssText = "padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.1);";
+      const titleEl = document.createElement("div");
+      titleEl.textContent = title;
+      titleEl.style.cssText = "font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.5);margin-bottom:4px;";
+      row.appendChild(titleEl);
+      const hstack = document.createElement("div");
+      hstack.style.cssText = "display:flex;align-items:center;gap:8px;";
+      hstack.appendChild(createTimerSvg(timerId));
+      const labels = document.createElement("div");
+      labels.style.cssText = "display:flex;flex-direction:column;gap:1px;";
+      const nameEl = document.createElement("div");
+      nameEl.textContent = constName;
+      nameEl.style.cssText = "font-size:10px;color:rgba(255,255,255,0.6);font-family:monospace;";
+      const valEl = document.createElement("div");
+      valEl.textContent = constValue + " ms";
+      valEl.style.cssText = "font-size:12px;color:#f8f9fa;font-family:monospace;";
+      labels.appendChild(nameEl);
+      labels.appendChild(valEl);
+      hstack.appendChild(labels);
+      row.appendChild(hstack);
+      return row;
+    }
+    function ensureTimerKeyframes() {
+      if (document.getElementById("ml-debug-keyframes")) {
+        return;
+      }
+      const style2 = document.createElement("style");
+      style2.id = "ml-debug-keyframes";
+      const circ = 2 * Math.PI * 13;
+      style2.textContent = `
+            @keyframes mlTimerRing {
+                from { stroke-dashoffset: 0; }
+                to   { stroke-dashoffset: ${circ}; }
+            }
+            @keyframes mlDebugEventFadeOut {
+                from { opacity: 1; }
+                to   { opacity: 0; }
+            }
+        `;
+      document.head.appendChild(style2);
+    }
+    function logDebugEvent(event, phase, consumed) {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return null;
+      }
+      const list = debugPanelEl.querySelector("#ml-debug-events");
+      if (!list) {
+        return null;
+      }
+      let keyLabel = "";
+      if (event.type === "mousedown" || event.type === "mouseup" || event.type === "click") {
+        const btn = event.button === 2 ? "right" : event.button === 1 ? "middle" : "left";
+        keyLabel = btn + " btn";
+      } else if (event.type === "contextmenu") {
+        keyLabel = "right btn";
+      } else {
+        const parts = [];
+        if (event.metaKey) {
+          parts.push("\u2318");
+        }
+        if (event.ctrlKey) {
+          parts.push("\u2303");
+        }
+        if (event.altKey) {
+          parts.push("\u2325");
+        }
+        if (event.shiftKey) {
+          parts.push("\u21E7");
+        }
+        const k = event.key;
+        if (k && k !== "Meta" && k !== "Control" && k !== "Alt" && k !== "Shift") {
+          const norm = normalizeKeyForStorage(k);
+          if (norm) {
+            const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, norm) ? KEY_GLYPHS[norm] : null;
+            parts.push(glyph !== null ? glyph : norm.length === 1 ? norm.toUpperCase() : norm);
+          } else {
+            parts.push(k);
+          }
+        } else if (k) {
+          const modGlyphs = { "Meta": "\u2318", "Control": "\u2303", "Alt": "\u2325", "Shift": "\u21E7" };
+          parts.push(modGlyphs[k] || k);
+        }
+        keyLabel = parts.join("+") || "?";
+      }
+      const phaseShort = phase.replace("down", "\u2193").replace("up", "\u2191");
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:2px 4px;font-size:11px;font-family:monospace;color:#f8f9fa;border-bottom:1px solid rgba(255,255,255,0.06);";
+      const left = document.createElement("span");
+      left.textContent = `${keyLabel}  ${phaseShort}`;
+      row.appendChild(left);
+      const right = document.createElement("span");
+      right.id = "ml-debug-event-status-" + ++debugEventCounter;
+      if (consumed === true) {
+        right.textContent = "consumed";
+        right.style.color = "#f87171";
+      } else if (consumed === false) {
+        right.textContent = "passed";
+        right.style.color = "#86efac";
+      } else {
+        right.textContent = "\u2026";
+        right.style.color = "rgba(255,255,255,0.4)";
+      }
+      row.appendChild(right);
+      list.insertBefore(row, list.firstChild);
+      while (list.childElementCount > 30) {
+        list.removeChild(list.lastChild);
+      }
+      const fadeDelay = Math.max(0, DEBUG_EVENT_DISPLAY_MS - DEBUG_EVENT_FADEOUT_MS);
+      setTimeout(() => {
+        row.style.animation = `mlDebugEventFadeOut ${DEBUG_EVENT_FADEOUT_MS}ms linear forwards`;
+        setTimeout(() => {
+          if (row.parentNode) {
+            row.remove();
+          }
+        }, DEBUG_EVENT_FADEOUT_MS);
+      }, fadeDelay);
+      return { row, statusEl: right };
+    }
+    function markDebugEventStatus(handle, consumed) {
+      if (!handle || !handle.statusEl) {
+        return;
+      }
+      if (consumed) {
+        handle.statusEl.textContent = "consumed";
+        handle.statusEl.style.color = "#f87171";
+      } else {
+        handle.statusEl.textContent = "passed";
+        handle.statusEl.style.color = "#86efac";
+      }
+    }
+    function updateDebugPanelState() {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return;
+      }
+      const stateEl = debugPanelEl.querySelector("#ml-debug-state");
+      if (stateEl) {
+        let stateStr = "idle";
+        if (recordingAction) {
+          stateStr = `recording: ${ACTION_LABELS[recordingAction] || recordingAction}`;
+        } else if (inferBufferActive) {
+          stateStr = `buffer active (${inferBufferLinks.length} links)`;
+        } else {
+          const advancing = Object.keys(chordProgress).filter((k) => !!chordProgress[k]);
+          if (advancing.length > 0) {
+            stateStr = `chord advancing: ${advancing.join(", ")}`;
+          }
+        }
+        stateEl.textContent = stateStr;
+      }
+      const heldEl = debugPanelEl.querySelector("#ml-debug-held-keys");
+      if (heldEl) {
+        if (pressedKeys.size === 0) {
+          heldEl.textContent = "\u2014";
+        } else {
+          heldEl.textContent = Array.from(pressedKeys).map((k) => {
+            const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, k) ? KEY_GLYPHS[k] : null;
+            return glyph !== null ? glyph : k.length === 1 ? k.toUpperCase() : k;
+          }).join("  ");
+        }
+      }
+    }
+    function setDebugLastAction(label) {
+      if (!debugPanelEl) {
+        return;
+      }
+      const el = debugPanelEl.querySelector("#ml-debug-last-action");
+      if (el) {
+        el.textContent = label;
+      }
+    }
+    function updateDebugCursor() {
+      if (!isDebugPanelVisible || !debugPanelEl) {
+        return;
+      }
+      const el = debugPanelEl.querySelector("#ml-debug-cursor");
+      if (!el) {
+        return;
+      }
+      try {
+        const target = document.elementFromPoint(mouseX, mouseY);
+        const anchor = target ? target.closest("a") : null;
+        const url = anchor ? anchor.href : window.location.href;
+        const truncUrl = url ? url.substring(0, 70) : "\u2014";
+        const kind = anchor ? "anchor" : "page";
+        el.textContent = `x:${mouseX}  y:${mouseY}  ${kind}: ${truncUrl}`;
+      } catch (e) {
+        el.textContent = `x:${mouseX}  y:${mouseY}`;
+      }
+    }
+    function openDebugPanel() {
+      if (isDebugPanelVisible && debugPanelEl && document.body.contains(debugPanelEl)) {
+        return;
+      }
+      ensureTimerKeyframes();
+      isDebugPanelVisible = true;
+      if (!debugPanelEl) {
+        let sectionLabel = function(text) {
+          const el = document.createElement("div");
+          el.textContent = text;
+          el.style.cssText = "font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);margin:8px 0 2px;";
+          return el;
+        }, infoRow = function(labelText, id) {
+          const row = document.createElement("div");
+          row.style.cssText = "display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);";
+          const lbl = document.createElement("span");
+          lbl.textContent = labelText;
+          lbl.style.cssText = "font-size:10px;color:rgba(255,255,255,0.5);flex-shrink:0;margin-right:6px;";
+          const val = document.createElement("span");
+          val.id = id;
+          val.textContent = "\u2014";
+          val.style.cssText = "font-size:11px;color:#f8f9fa;text-align:right;word-break:break-all;";
+          row.appendChild(lbl);
+          row.appendChild(val);
+          return row;
+        };
+        const panel = document.createElement("div");
+        panel.id = "ml-debug-panel";
+        panel.style.cssText = [
+          "position:fixed",
+          "top:12px",
+          "right:12px",
+          "width:260px",
+          "background:rgba(17,17,27,0.92)",
+          "backdrop-filter:blur(6px)",
+          "border:1px solid rgba(255,255,255,0.15)",
+          "border-radius:8px",
+          "padding:10px 12px",
+          "z-index:1000002",
+          "font-family:sans-serif",
+          "color:#f8f9fa",
+          "box-shadow:0 4px 24px rgba(0,0,0,0.5)",
+          "max-height:80vh",
+          "overflow-y:auto"
+        ].join(";");
+        const header = document.createElement("div");
+        header.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;";
+        const title = document.createElement("span");
+        title.textContent = "\u{1F527} Debug";
+        title.style.cssText = "font-size:12px;font-weight:700;letter-spacing:0.04em;color:#f8f9fa;";
+        const closeBtn = document.createElement("button");
+        closeBtn.textContent = "\u2715";
+        closeBtn.style.cssText = "background:none;border:none;color:rgba(255,255,255,0.5);font-size:12px;cursor:pointer;padding:0 2px;";
+        closeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          closeDebugPanel();
+        });
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        panel.appendChild(header);
+        panel.appendChild(sectionLabel("State"));
+        panel.appendChild(infoRow("script", "ml-debug-state"));
+        panel.appendChild(infoRow("held keys", "ml-debug-held-keys"));
+        panel.appendChild(infoRow("last action", "ml-debug-last-action"));
+        panel.appendChild(sectionLabel("Cursor"));
+        const cursorRow = document.createElement("div");
+        cursorRow.style.cssText = "padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);";
+        const cursorSpan = document.createElement("span");
+        cursorSpan.id = "ml-debug-cursor";
+        cursorSpan.textContent = "x:\u2014  y:\u2014  target:\u2014";
+        cursorSpan.style.cssText = "font-size:10px;color:rgba(255,255,255,0.7);font-family:monospace;word-break:break-all;";
+        cursorRow.appendChild(cursorSpan);
+        panel.appendChild(cursorRow);
+        panel.appendChild(sectionLabel("Chord timers"));
+        panel.appendChild(createTimerRow("record", "Record pause", "CHORD_RECORD_TIMEOUT_MS", CHORD_RECORD_TIMEOUT_MS));
+        panel.appendChild(createTimerRow("playback", "Playback window", "CHORD_PLAYBACK_TIMEOUT_MS", CHORD_PLAYBACK_TIMEOUT_MS));
+        const evtHeader = document.createElement("div");
+        evtHeader.style.cssText = "display:flex;align-items:center;gap:4px;margin:8px 0 2px;";
+        const evtLabel = document.createElement("span");
+        evtLabel.textContent = "EVENTS";
+        evtLabel.style.cssText = "font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);";
+        const helpBtn = document.createElement("button");
+        helpBtn.textContent = "?";
+        helpBtn.style.cssText = "background:none;border:1px solid rgba(255,255,255,0.3);border-radius:50%;color:rgba(255,255,255,0.5);font-size:9px;width:14px;height:14px;cursor:pointer;line-height:1;padding:0;";
+        helpBtn.title = [
+          "consumed \u2014 script called preventDefault() on this event.",
+          "  The event stops here and is not delivered to the page.",
+          "",
+          "passed \u2014 script let this event through normally.",
+          "",
+          "Mouse down/up events are observed (debug-only listeners);",
+          "  the script never consumes them directly."
+        ].join("\n");
+        evtHeader.appendChild(evtLabel);
+        evtHeader.appendChild(helpBtn);
+        panel.appendChild(evtHeader);
+        const eventList = document.createElement("div");
+        eventList.id = "ml-debug-events";
+        eventList.style.cssText = "max-height:180px;overflow-y:auto;";
+        panel.appendChild(eventList);
+        document.body.appendChild(panel);
+        debugPanelEl = panel;
+      } else {
+        document.body.appendChild(debugPanelEl);
+      }
+      updateDebugPanelState();
+      updateDebugCursor();
+    }
+    function closeDebugPanel() {
+      isDebugPanelVisible = false;
+      if (debugPanelEl && debugPanelEl.parentNode) {
+        debugPanelEl.remove();
+      }
+    }
+    function toggleDebugPanel() {
+      if (!isDebug) {
+        return;
+      }
+      if (isDebugPanelVisible) {
+        closeDebugPanel();
+      } else {
+        openDebugPanel();
+      }
+    }
     document.addEventListener("keydown", (event) => {
-      if (event.key && event.key.length === 1) {
-        pressedKeys.add(event.key.toLowerCase());
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      if (event.repeat) {
+        return;
+      }
+      debugLastKeyEventEl = logDebugEvent(event, "keydown", null);
+      updateDebugPanelState();
+    }, true);
+    document.addEventListener("keyup", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      logDebugEvent(event, "keyup", null);
+      updateDebugPanelState();
+    }, true);
+    document.addEventListener("mousedown", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      logDebugEvent(event, "mousedown", false);
+    }, true);
+    document.addEventListener("mouseup", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      logDebugEvent(event, "mouseup", false);
+    }, true);
+    document.addEventListener("click", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      debugLastClickEventEl = logDebugEvent(event, "click", null);
+    }, true);
+    document.addEventListener("contextmenu", (event) => {
+      if (!isDebugPanelVisible) {
+        return;
+      }
+      debugLastClickEventEl = logDebugEvent(event, "contextmenu", null);
+    }, true);
+    log("Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)");
+    document.addEventListener("keydown", (event) => {
+      const storageKey = normalizeKeyForStorage(event.key);
+      if (storageKey) {
+        pressedKeys.add(storageKey);
       }
     }, true);
     document.addEventListener("keyup", (event) => {
-      if (event.key && event.key.length === 1) {
-        pressedKeys.delete(event.key.toLowerCase());
+      const storageKey = normalizeKeyForStorage(event.key);
+      if (storageKey) {
+        pressedKeys.delete(storageKey);
       }
     }, true);
     log("Did add keydown listener for key tracking");
@@ -7136,25 +7899,33 @@ ${document.documentElement.outerHTML}`;
     log("Will add keyup listener to track key releases");
     document.addEventListener("keyup", (event) => {
       logFunctionBegin("keyup tracker");
-      log(`Key released: ${event.key}, altKey=${event.altKey}`);
-      console.log(`[MARKDOWN_LINKER_DEBUG] KeyUp: released=${event.key}, altKey=${event.altKey}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
-      const wasAltZActive = isAltZBufferActive;
-      const bufferStillHeld = isAltZBufferActive && actionMatchesClick("inferBuffer", bindingState(event));
-      log(`Buffer still held: ${bufferStillHeld}, was active: ${wasAltZActive}`);
-      if (wasAltZActive && !bufferStillHeld) {
-        log(`Alt+Z was deactivated, processing buffer with ${altZClickBuffer.length} buffered links`);
-        isAltZBufferActive = false;
-        if (altZClickBuffer.length > 0) {
-          log("Will compile buffered links into markdown list");
-          compileAndCopyBufferedLinks(altZClickBuffer);
-          const count = altZClickBuffer.length;
-          altZClickBuffer = [];
-          log(`Did process ${count} links and clear buffer`);
-        } else {
-          log("Buffer is empty, nothing to copy");
+      if (!inferBufferActive) {
+        logFunctionEnd("keyup tracker");
+        return;
+      }
+      log(`Key released during buffer: key=${event.key}, links=${inferBufferLinks.length}`);
+      let shouldFinalize = false;
+      if (event.key === "Meta" && inferBufferHoldMeta) {
+        shouldFinalize = true;
+      }
+      if (event.key === "Control" && inferBufferHoldCtrl) {
+        shouldFinalize = true;
+      }
+      if (event.key === "Alt" && inferBufferHoldAlt) {
+        shouldFinalize = true;
+      }
+      if (event.key === "Shift" && inferBufferHoldShift) {
+        shouldFinalize = true;
+      }
+      if (!shouldFinalize) {
+        const releasedKey = normalizeKeyForStorage(event.key);
+        if (releasedKey && inferBufferHoldKeys.has(releasedKey)) {
+          shouldFinalize = true;
         }
-      } else {
-        log("Alt+Z was not active or combo still active, skipping buffer processing");
+      }
+      if (shouldFinalize) {
+        log(`Hold key released (${event.key}), finalizing buffer`);
+        finalizeInferBuffer();
       }
       logFunctionEnd("keyup tracker");
     }, false);

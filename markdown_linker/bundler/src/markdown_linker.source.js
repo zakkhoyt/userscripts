@@ -179,6 +179,12 @@
     let captureMode = CAPTURE_MODE_OPTIONS[0].id;
     let captureMenuCommandId = null;
 
+    // ---- Chord/debug timing constants ----
+    const CHORD_RECORD_TIMEOUT_MS   = 500;   // recording between-term pause
+    const CHORD_PLAYBACK_TIMEOUT_MS = 1500;  // playback chord inactivity window
+    const DEBUG_EVENT_DISPLAY_MS    = 1500;  // how long event rows stay visible
+    const DEBUG_EVENT_FADEOUT_MS    = 300;   // fade animation duration (subset of above)
+
     // ---- Configurable triggers (replaces the hard-coded Alt modifier) ----
     // A binding = { modifiers:{meta,ctrl,alt,shift}, keys:[lowercase chars], requiresClick }.
     // Modifiers are read from the event; regular keys from the `pressedKeys` set. `fn` is NOT
@@ -186,10 +192,11 @@
     // that are unbound in the YouTube player and in Firefox: V (menu), B (quiet copy), Z (buffer).
     const TRIGGERS_PREF_KEY = 'markdown_linker.triggers';
     const DEFAULT_TRIGGERS = {
-        menu:         [{ modifiers: {}, keys: ['v'], requiresClick: false }],  // hover + V -> open menu
-        inferQuiet:   [{ modifiers: {}, keys: ['b'], requiresClick: false }],  // hover + B -> copy one link
-        inferBuffer:  [{ modifiers: {}, keys: ['z'], requiresClick: true  }],  // hold Z + click… -> buffer list
-        openSettings: []                                                        // no default — user records their own
+        menu:            [{ modifiers: {}, keys: ['v'], requiresClick: false }],  // hover + V -> open menu
+        inferQuiet:      [{ modifiers: {}, keys: ['b'], requiresClick: false }],  // hover + B -> copy one link
+        inferBuffer:     [{ modifiers: {}, keys: ['z'], requiresClick: true  }],  // hold Z + click… -> buffer list
+        openSettings:    [],                                                       // no default — user records their own
+        toggleDebugPanel: []                                                       // no default — user records their own
     };
     let triggers = cloneTriggers(DEFAULT_TRIGGERS);
     // ============================================================================
@@ -2857,9 +2864,10 @@
         // Using fixed position to stay visible during page scroll
         // High z-index (999999) to appear above most page content
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/style
+        const debugPanelHeight = (isDebugPanelVisible && debugPanelEl) ? debugPanelEl.offsetHeight : 0;
+        const notifTop = 20 + (debugPanelHeight > 0 ? debugPanelHeight + 8 : 0);
         notification.style.cssText = `
             position: fixed;
-            top: 20px;
             right: 20px;
             background: #4CAF50;
             color: white;
@@ -2872,6 +2880,7 @@
             white-space: pre-line;
             animation: mdLinkerFadeIn 0.3s, mdLinkerFadeOut 0.3s 2.7s;
         `;
+        notification.style.top = notifTop + 'px';
 
         log('Will append notification to body');
         // appendChild returns the appended node, but we don't use it
@@ -4021,6 +4030,56 @@
     }
 
     /**
+     * Glyph table for named keys that have Unicode symbols.
+     * Keys are stored lowercase in bindings; match with event.key.toLowerCase().
+     */
+    const KEY_GLYPHS = {
+        ' ':          '␣',
+        'escape':     '⎋',
+        'tab':        '⇥',
+        'enter':      '↩',
+        'backspace':  '⌫',
+        'delete':     '⌦',
+        'pageup':     '⇞',
+        'pagedown':   '⇟',
+        'home':       '↖',
+        'end':        '↘',
+        'arrowup':    '↑',
+        'arrowdown':  '↓',
+        'arrowleft':  '←',
+        'arrowright': '→',
+    };
+
+    /**
+     * Normalises event.key to the lowercase storage key used in bindings.keys[].
+     * Returns null for keys that cannot be recorded (modifiers, Escape, Unidentified, etc.).
+     *   'a'          → 'a'         (single printable)
+     *   ' '          → ' '         (space, stored as ' ', displayed as ␣)
+     *   'Enter'      → 'enter'     (in KEY_GLYPHS)
+     *   'ArrowLeft'  → 'arrowleft' (in KEY_GLYPHS)
+     *   'F1'         → 'f1'        (F-key)
+     *   'Shift'      → null        (modifier — not recordable as a key)
+     *   'Escape'     → null        (reserved for recording-cancel)
+     *   'Unidentified' → null
+     */
+    function normalizeKeyForStorage(eventKey) {
+        if (!eventKey || eventKey === 'Unidentified') { return null; }
+        // Modifiers are never stored as keys.
+        if (eventKey === 'Shift' || eventKey === 'Control' ||
+            eventKey === 'Alt'   || eventKey === 'Meta') { return null; }
+        // Escape is reserved as the recording-cancel shortcut.
+        if (eventKey === 'Escape') { return null; }
+        const lower = eventKey.toLowerCase();
+        // Single printable char (including space).
+        if (eventKey.length === 1) { return lower; }
+        // Named keys with glyphs.
+        if (Object.prototype.hasOwnProperty.call(KEY_GLYPHS, lower)) { return lower; }
+        // F-keys (F1..F19).
+        if (/^f([1-9]|1[0-9])$/.test(lower)) { return lower; }
+        return null;
+    }
+
+    /**
      * True if a binding requires at least one key, modifier, or click (never matches "no input").
      * Chord bindings (binding.terms[]) are considered valid when they have at least one term.
      * A bare click (requiresClick:true, no keys, no modifiers) is a valid trigger on its own.
@@ -4108,6 +4167,7 @@
         const p = chordProgress[actionName];
         if (p && p.timer) { clearTimeout(p.timer); }
         delete chordProgress[actionName];
+        debugTimerStop('playback');
     }
 
     /**
@@ -4134,8 +4194,9 @@
             if (expectedIdx + 1 >= binding.terms.length) {
                 return 'complete';
             }
-            const timer = setTimeout(() => { delete chordProgress[actionName]; }, 1500);
+            const timer = setTimeout(() => { delete chordProgress[actionName]; }, CHORD_PLAYBACK_TIMEOUT_MS);
             chordProgress[actionName] = { bindingIndex: bi, nextTermIdx: expectedIdx + 1, timer };
+            debugTimerStart('playback', CHORD_PLAYBACK_TIMEOUT_MS);
             return 'advance';
         }
         if (progress) { clearChordProgress(actionName); }
@@ -4175,10 +4236,11 @@
 
     // ---- Trigger settings panel + "record combo" UI ----
     const ACTION_LABELS = {
-        menu:         'Open menu',
-        inferQuiet:   'Quiet copy (no menu)',
-        inferBuffer:  'Buffer links (hold + click)',
-        openSettings: 'Open settings'
+        menu:             'Open menu',
+        inferQuiet:       'Quiet copy (no menu)',
+        inferBuffer:      'Buffer links (hold + click)',
+        openSettings:     'Open settings',
+        toggleDebugPanel: 'Toggle debug panel'
     };
     let settingsPanelEl = null;
     let settingsBodyEl = null;
@@ -4205,7 +4267,17 @@
         if (m.ctrl)  { parts.push('⌃'); }
         if (m.alt)   { parts.push('⌥'); }
         if (m.shift) { parts.push('⇧'); }
-        (term.keys || []).forEach((key) => parts.push(key.toUpperCase()));
+        (term.keys || []).forEach((key) => {
+            const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, key) ? KEY_GLYPHS[key] : null;
+            if (glyph !== null) {
+                parts.push(glyph);
+            } else if (key.length === 1) {
+                parts.push(key.toUpperCase());
+            } else {
+                // F-keys and other multi-char keys: capitalise first letter (e.g. 'f1' → 'F1').
+                parts.push(key.charAt(0).toUpperCase() + key.slice(1));
+            }
+        });
         let label = parts.join('+');
         if (term.requiresClick) {
             const n = term.clickCount || 1;
@@ -4250,6 +4322,7 @@
     function clearRecordTimers() {
         if (recordChordTimer) { clearTimeout(recordChordTimer); recordChordTimer = null; }
         if (recordClickTimer) { clearTimeout(recordClickTimer); recordClickTimer = null; }
+        debugTimerStop('record');
     }
 
     function updateRecordOverlay() {
@@ -4350,8 +4423,9 @@
         if (event.key === 'Escape') { stopRecording(); return; }
         clearRecordTimers(); // new keydown cancels the between-term pause timer
         accumulateRecordModifiers(event);
-        if (event.key && event.key.length === 1) {
-            recordCurrentKeys.add(event.key.toLowerCase());
+        const storageKey = normalizeKeyForStorage(event.key);
+        if (storageKey) {
+            recordCurrentKeys.add(storageKey);
         }
         updateRecordOverlay();
     }
@@ -4368,8 +4442,10 @@
             recordChordTimer = setTimeout(() => {
                 recordChordTimer = null;
                 commitChord();
-            }, 500);
+            }, CHORD_RECORD_TIMEOUT_MS);
+            debugTimerStart('record', CHORD_RECORD_TIMEOUT_MS);
             updateRecordOverlay();
+            updateDebugPanelState();
         }
         // Releasing a modifier with no keys yet does nothing (user may still add keys).
     }
@@ -4418,6 +4494,7 @@
         window.addEventListener('click',        recordClickHandler,        true);
         window.addEventListener('contextmenu',  recordContextMenuHandler,  true);
         showRecordOverlay(actionName);
+        updateDebugPanelState();
     }
 
     function stopRecording() {
@@ -4431,6 +4508,7 @@
         resetCurrentTerm();
         hideRecordOverlay();
         refreshSettingsPanel();
+        updateDebugPanelState();
     }
 
     function renderSettingsBody(body) {
@@ -4603,10 +4681,11 @@
         const clickState = bindingState(event);
         const menuClick   = actionMatchesClick('menu',        clickState, event.detail || 1, false);
         const bufferClick = actionMatchesClick('inferBuffer', clickState, event.detail || 1, false);
-        log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
+        log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${inferBufferActive}, buffer size=${inferBufferLinks.length}`);
 
         if (!menuClick && !bufferClick) {
             log('No click trigger matched, returning');
+            markDebugEventStatus(debugLastClickEventEl, false);
             logFunctionEnd('handleClick');
             return;
         }
@@ -4616,16 +4695,17 @@
         log('Will prevent default and stop propagation');
         event.preventDefault();
         event.stopPropagation();
+        markDebugEventStatus(debugLastClickEventEl, true);
         log('Did prevent default and stop propagation');
 
         // Buffer (auto-infer) mode when the buffer trigger matched; otherwise open the menu.
         const isAutoInferMode = bufferClick;
         log(`Is auto-infer (buffer) mode: ${isAutoInferMode}`);
         
-        // If we just entered auto-infer mode, mark that the buffer is now active
-        if (isAutoInferMode && !isAltZBufferActive) {
-            isAltZBufferActive = true;
-            log('Activated Alt+Z buffer mode');
+        // If we just entered auto-infer mode, snapshot hold state on first trigger.
+        if (isAutoInferMode && !inferBufferActive) {
+            activateInferBuffer(event);
+            setDebugLastAction('inferBuffer activated');
         }
         // Returns null if no match found
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Element/closest
@@ -4650,8 +4730,8 @@
                     showClickFeedback(event.clientX, event.clientY);
                     log('Did show click feedback animation');
                     
-                    altZClickBuffer.push({ url: targetUrl, anchor: anchor });
-                    log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+                    inferBufferLinks.push({ url: targetUrl, anchor: anchor });
+                    log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
                 } else {
                     log('In normal mode, will create menu for anchor');
                     if (maybeAutoCopySelection(false, targetUrl)) {
@@ -4673,8 +4753,8 @@
                     showClickFeedback(event.clientX, event.clientY);
                     log('Did show click feedback animation');
                     
-                    altZClickBuffer.push({ url: targetUrl, anchor: null });
-                    log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+                    inferBufferLinks.push({ url: targetUrl, anchor: null });
+                    log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
                 } else {
                     log('In normal mode, will create menu for page (fallback)');
                     if (maybeAutoCopySelection(false, targetUrl)) {
@@ -4699,8 +4779,8 @@
                 showClickFeedback(event.clientX, event.clientY);
                 log('Did show click feedback animation');
                 
-                altZClickBuffer.push({ url: targetUrl, anchor: null });
-                log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+                inferBufferLinks.push({ url: targetUrl, anchor: null });
+                log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
             } else {
                 log('In normal mode, will create menu for page');
                 if (maybeAutoCopySelection(false, targetUrl)) {
@@ -4728,6 +4808,7 @@
         const contextState = bindingState(event);
         if (!actionMatchesClick('menu', contextState, event.detail || 1, true)) {
             log('No menu trigger matched on right-click, returning');
+            markDebugEventStatus(debugLastClickEventEl, false);
             logFunctionEnd('handleContextMenu');
             return;
         }
@@ -4736,6 +4817,7 @@
         log('Will prevent default and stop propagation');
         event.preventDefault();
         event.stopPropagation();
+        markDebugEventStatus(debugLastClickEventEl, true);
         log('Did prevent default and stop propagation');
 
         log('Will find closest anchor element');
@@ -4842,19 +4924,21 @@
         // Check if M key pressed (case-insensitive)
         // Alt+M or M alone (without Ctrl/Shift/Meta)
         if (event.repeat) { return; } // ignore auto-repeat; fire once per press
-        const justPressedKey = (event.key && event.key.length === 1) ? event.key.toLowerCase() : null;
+        const justPressedKey = normalizeKeyForStorage(event.key);
         const keyState = bindingState(event);
         // Chord matching is evaluated once per keydown. chordActionResult() is stateful
         // (it mutates chordProgress), so it must be called exactly once per action here.
-        const menuChordResult     = justPressedKey ? chordActionResult('menu',         keyState, justPressedKey) : null;
-        const inferChordResult    = justPressedKey ? chordActionResult('inferQuiet',   keyState, justPressedKey) : null;
-        const settingsChordResult = justPressedKey ? chordActionResult('openSettings', keyState, justPressedKey) : null;
+        const menuChordResult        = justPressedKey ? chordActionResult('menu',             keyState, justPressedKey) : null;
+        const inferChordResult       = justPressedKey ? chordActionResult('inferQuiet',       keyState, justPressedKey) : null;
+        const settingsChordResult    = justPressedKey ? chordActionResult('openSettings',     keyState, justPressedKey) : null;
+        const debugPanelChordResult  = justPressedKey ? chordActionResult('toggleDebugPanel', keyState, justPressedKey) : null;
 
-        const isMenuKey     = !!justPressedKey && (keyboardActionTriggered('menu',         keyState, justPressedKey) || menuChordResult === 'complete');
-        const isInferKey    = !!justPressedKey && (keyboardActionTriggered('inferQuiet',   keyState, justPressedKey) || inferChordResult === 'complete');
-        const isSettingsKey = !!justPressedKey && (keyboardActionTriggered('openSettings', keyState, justPressedKey) || settingsChordResult === 'complete');
+        const isMenuKey        = !!justPressedKey && (keyboardActionTriggered('menu',             keyState, justPressedKey) || menuChordResult === 'complete');
+        const isInferKey       = !!justPressedKey && (keyboardActionTriggered('inferQuiet',       keyState, justPressedKey) || inferChordResult === 'complete');
+        const isSettingsKey    = !!justPressedKey && (keyboardActionTriggered('openSettings',     keyState, justPressedKey) || settingsChordResult === 'complete');
+        const isDebugPanelKey  = !!justPressedKey && (keyboardActionTriggered('toggleDebugPanel', keyState, justPressedKey) || debugPanelChordResult === 'complete');
         // Consume intermediate chord terms so they don't fall through to other handlers.
-        const isChordAdvancing = menuChordResult === 'advance' || inferChordResult === 'advance' || settingsChordResult === 'advance';
+        const isChordAdvancing = menuChordResult === 'advance' || inferChordResult === 'advance' || settingsChordResult === 'advance' || debugPanelChordResult === 'advance';
 
         // Settings toggle: open panel if closed, close if already open.
         // Check document containment rather than just settingsPanelEl identity — the element
@@ -4865,6 +4949,8 @@
             event.preventDefault();
             event.stopPropagation();
             pressedKeys.clear();
+            markDebugEventStatus(debugLastKeyEventEl, true);
+            setDebugLastAction('settings toggled');
             const panelIsOpen = settingsPanelEl && document.body.contains(settingsPanelEl);
             if (panelIsOpen) {
                 closeTriggerSettings();
@@ -4874,29 +4960,44 @@
             return;
         }
 
+        if (isDebugPanelKey) {
+            if (!isDebug) { markDebugEventStatus(debugLastKeyEventEl, false); return; }
+            if (isInEditableContext(event)) { markDebugEventStatus(debugLastKeyEventEl, false); return; }
+            event.preventDefault();
+            event.stopPropagation();
+            pressedKeys.clear();
+            markDebugEventStatus(debugLastKeyEventEl, true);
+            setDebugLastAction('debug panel toggled');
+            toggleDebugPanel();
+            return;
+        }
+
         // An intermediate chord term matched (not complete yet). Consume the event so it
         // doesn't inadvertently trigger other shortcuts or page behaviour while the user
         // is mid-chord.
         if (isChordAdvancing) {
             event.preventDefault();
             event.stopPropagation();
+            markDebugEventStatus(debugLastKeyEventEl, true);
             return;
         }
 
         if (isMenuKey || isInferKey) {
             logFunctionBegin('handleKeydown');
             log(`Keyboard trigger detected (key=${justPressedKey}, menu=${isMenuKey}, inferQuiet=${isInferKey})`);
-            
+
             // Don't fire keyboard triggers while typing in a field.
             if (isInEditableContext(event)) {
                 log('In editable context (input/textarea/contenteditable), skipping keyboard trigger');
+                markDebugEventStatus(debugLastKeyEventEl, false);
                 logFunctionEnd('handleKeydown');
                 return;
             }
-            
+
             log('Will prevent default and stop propagation');
             event.preventDefault();
             event.stopPropagation();
+            markDebugEventStatus(debugLastKeyEventEl, true);
             log('Did prevent default and stop propagation');
 
             // Quiet auto-infer (no menu): copy the hovered link via the capture-aware compiler.
@@ -4905,10 +5006,12 @@
                 const inferAnchor = inferHovered ? inferHovered.closest('a') : null;
                 const inferRawUrl = inferAnchor ? extractUrlFromAnchor(inferAnchor, event) : window.location.href;
                 log('Keyboard auto-infer: copying single link without menu');
+                setDebugLastAction('inferQuiet fired (key: ' + justPressedKey + ')');
                 compileAndCopyBufferedLinks([{ url: inferRawUrl, anchor: inferAnchor }]);
                 logFunctionEnd('handleKeydown');
                 return;
             }
+            setDebugLastAction('menu fired (key: ' + justPressedKey + ')');
 
             // elementFromPoint() returns topmost element at given coordinates
             // Uses tracked mouse position since keyboard events don't have clientX/Y
@@ -4965,6 +5068,8 @@
                 createMenu(mouseX, mouseY, false);
             }
             logFunctionEnd('handleKeydown');
+        } else {
+            markDebugEventStatus(debugLastKeyEventEl, false);
         }
     }
 
@@ -4987,6 +5092,13 @@
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/clientX
         mouseX = event.clientX;
         mouseY = event.clientY;
+        // Throttle cursor row updates to ~10fps.
+        if (isDebugPanelVisible && !debugCursorThrottle) {
+            debugCursorThrottle = setTimeout(() => {
+                debugCursorThrottle = null;
+                updateDebugCursor();
+            }, 100);
+        }
     });
     log('Did add mousemove listener');
 
@@ -4995,79 +5107,598 @@
     // Type: Set<string> (stores key names like 'Alt', 'z', 'Z')
     // Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set
     const pressedKeys = new Set();
-    
-    // Buffer to collect multiple links while Alt+Z are held
-    // Each entry: {url: string, anchor: HTMLElement|null}
-    // Type: Array<{url: string, anchor: HTMLElement|null}>
-    let altZClickBuffer = [];
-    
-    // Flag to track if Alt+Z buffer mode is currently active
-    // Prevents reinitializing buffer on key repeat events
-    // Type: boolean
-    let isAltZBufferActive = false;
-    
-    // Keyboard shortcuts: Alt+M or M alone - register FIRST so key tracker captures SECOND (fires second during capture)
-    log('Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)');
-    // Simple state tracking: just remember if z is currently down
-    let isZKeyDown = false;
-    
+
+    // ---- inferBuffer state ----------------------------------------------------
+    // Links collected while the buffer trigger is held.
+    let inferBufferLinks = [];
+    // True while the buffer trigger has fired and its hold keys are still pressed.
+    let inferBufferActive = false;
+    // Modifier hold state captured at the moment the buffer was activated.
+    // Any one of these going up will finalize the buffer (option A).
+    let inferBufferHoldMeta  = false;
+    let inferBufferHoldCtrl  = false;
+    let inferBufferHoldAlt   = false;
+    let inferBufferHoldShift = false;
+    // Non-modifier hold keys (e.g. 'z') captured at activation.
+    let inferBufferHoldKeys  = new Set();
+
+    /**
+     * Records the hold state at the moment the buffer trigger fires.
+     * For a click-triggered buffer every key currently in pressedKeys is a hold key
+     * (the click itself is the trigger, not a key).
+     * @param {MouseEvent} clickEvent - The click event that activated the buffer.
+     */
+    function activateInferBuffer(clickEvent) {
+        inferBufferActive    = true;
+        inferBufferLinks     = [];
+        inferBufferHoldMeta  = !!(clickEvent && clickEvent.metaKey);
+        inferBufferHoldCtrl  = !!(clickEvent && clickEvent.ctrlKey);
+        inferBufferHoldAlt   = !!(clickEvent && clickEvent.altKey);
+        inferBufferHoldShift = !!(clickEvent && clickEvent.shiftKey);
+        inferBufferHoldKeys  = new Set(pressedKeys); // snapshot all held keys
+        log(`Infer buffer activated. Hold: meta=${inferBufferHoldMeta}, ctrl=${inferBufferHoldCtrl}, alt=${inferBufferHoldAlt}, shift=${inferBufferHoldShift}, keys=[${[...inferBufferHoldKeys].join(',')}]`);
+        updateDebugPanelState();
+    }
+
+    /**
+     * Flushes the link buffer and compiles the result. Resets all buffer state.
+     */
+    function finalizeInferBuffer() {
+        if (!inferBufferActive) { return; }
+        inferBufferActive    = false;
+        const links          = inferBufferLinks;
+        inferBufferLinks     = [];
+        inferBufferHoldKeys  = new Set();
+        inferBufferHoldMeta  = false;
+        inferBufferHoldCtrl  = false;
+        inferBufferHoldAlt   = false;
+        inferBufferHoldShift = false;
+        updateDebugPanelState();
+        if (links.length > 0) {
+            log(`Finalizing infer buffer with ${links.length} links`);
+            setDebugLastAction('inferBuffer finalized (' + links.length + ' links)');
+            compileAndCopyBufferedLinks(links);
+        } else {
+            log('Infer buffer finalized (empty, nothing to copy)');
+        }
+    }
+    // ---------------------------------------------------------------------------
+
+    // ---- Debug panel state variables ------------------------------------------
+    let isDebugPanelVisible = false;
+    let debugPanelEl = null;
+    let debugLastKeyEventEl = null;   // DOM element for last logged key event (to mark consumed)
+    let debugLastClickEventEl = null; // DOM element for last logged click/contextmenu event
+    let debugCursorThrottle = null;   // throttle timer for cursor row
+    let debugEventCounter = 0;        // unique ID counter for event status elements
+
+    // ============================================================================
+    // DEBUG PANEL
+    // ============================================================================
+
+    /**
+     * Starts the SVG timer-ring animation for the given timer row.
+     * @param {'record'|'playback'} timerId
+     * @param {number} durationMs
+     */
+    function debugTimerStart(timerId, durationMs) {
+        if (!isDebugPanelVisible || !debugPanelEl) { return; }
+        const ring = debugPanelEl.querySelector('#ml-debug-ring-' + timerId);
+        const fill = debugPanelEl.querySelector('#ml-debug-fill-' + timerId);
+        if (!ring || !fill) { return; }
+        fill.style.fill = 'rgba(239,68,68,0.55)';
+        // Restart animation by removing, forcing reflow, re-adding.
+        ring.style.animation = 'none';
+        void ring.getBoundingClientRect(); // force reflow
+        ring.style.animationDuration = durationMs + 'ms';
+        ring.style.animation = `mlTimerRing ${durationMs}ms linear forwards`;
+    }
+
+    /**
+     * Stops the timer-ring animation (inactive state).
+     * @param {'record'|'playback'} timerId
+     */
+    function debugTimerStop(timerId) {
+        if (!debugPanelEl) { return; }
+        const ring = debugPanelEl.querySelector('#ml-debug-ring-' + timerId);
+        const fill = debugPanelEl.querySelector('#ml-debug-fill-' + timerId);
+        if (!ring) { return; }
+        ring.style.animation = 'none';
+        if (fill) { fill.style.fill = 'transparent'; }
+    }
+
+    /**
+     * Creates the SVG timer circle widget.
+     * Returns an SVG element.
+     * @param {'record'|'playback'} timerId
+     */
+    function createTimerSvg(timerId) {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('width', '36');
+        svg.setAttribute('height', '36');
+        svg.style.cssText = 'flex-shrink:0;';
+
+        // Track ring (faint white).
+        const track = document.createElementNS(ns, 'circle');
+        track.setAttribute('cx', '18');
+        track.setAttribute('cy', '18');
+        track.setAttribute('r', '13');
+        track.setAttribute('fill', 'none');
+        track.setAttribute('stroke', 'rgba(255,255,255,0.2)');
+        track.setAttribute('stroke-width', '4');
+
+        // Fill circle (red when active, transparent when not).
+        const fill = document.createElementNS(ns, 'circle');
+        fill.id = 'ml-debug-fill-' + timerId;
+        fill.setAttribute('cx', '18');
+        fill.setAttribute('cy', '18');
+        fill.setAttribute('r', '11');
+        fill.setAttribute('fill', 'transparent');
+
+        // Progress ring (white stroke, sweeps clockwise).
+        const circ = 2 * Math.PI * 13; // ≈ 81.7
+        const ring = document.createElementNS(ns, 'circle');
+        ring.id = 'ml-debug-ring-' + timerId;
+        ring.setAttribute('cx', '18');
+        ring.setAttribute('cy', '18');
+        ring.setAttribute('r', '13');
+        ring.setAttribute('fill', 'none');
+        ring.setAttribute('stroke', 'rgba(255,255,255,0.9)');
+        ring.setAttribute('stroke-width', '4');
+        ring.setAttribute('stroke-dasharray', String(circ));
+        ring.setAttribute('stroke-dashoffset', '0');
+        ring.style.cssText = 'transform-origin:18px 18px;transform:rotate(-90deg);';
+
+        svg.appendChild(track);
+        svg.appendChild(fill);
+        svg.appendChild(ring);
+        return svg;
+    }
+
+    /**
+     * Creates one timer row for the debug panel.
+     * @param {'record'|'playback'} timerId
+     * @param {string} title
+     * @param {string} constName
+     * @param {number} constValue
+     */
+    function createTimerRow(timerId, title, constName, constValue) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.1);';
+
+        const titleEl = document.createElement('div');
+        titleEl.textContent = title;
+        titleEl.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.5);margin-bottom:4px;';
+        row.appendChild(titleEl);
+
+        const hstack = document.createElement('div');
+        hstack.style.cssText = 'display:flex;align-items:center;gap:8px;';
+
+        hstack.appendChild(createTimerSvg(timerId));
+
+        const labels = document.createElement('div');
+        labels.style.cssText = 'display:flex;flex-direction:column;gap:1px;';
+        const nameEl = document.createElement('div');
+        nameEl.textContent = constName;
+        nameEl.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.6);font-family:monospace;';
+        const valEl = document.createElement('div');
+        valEl.textContent = constValue + ' ms';
+        valEl.style.cssText = 'font-size:12px;color:#f8f9fa;font-family:monospace;';
+        labels.appendChild(nameEl);
+        labels.appendChild(valEl);
+        hstack.appendChild(labels);
+
+        row.appendChild(hstack);
+        return row;
+    }
+
+    /**
+     * Adds a keyframe rule to the document for the timer animation (idempotent).
+     */
+    function ensureTimerKeyframes() {
+        if (document.getElementById('ml-debug-keyframes')) { return; }
+        const style = document.createElement('style');
+        style.id = 'ml-debug-keyframes';
+        const circ = 2 * Math.PI * 13;
+        style.textContent = `
+            @keyframes mlTimerRing {
+                from { stroke-dashoffset: 0; }
+                to   { stroke-dashoffset: ${circ}; }
+            }
+            @keyframes mlDebugEventFadeOut {
+                from { opacity: 1; }
+                to   { opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    /**
+     * Logs a key/mouse event to the debug panel event list.
+     * @param {Event}   event
+     * @param {string}  phase
+     * @param {boolean|null} consumed
+     */
+    function logDebugEvent(event, phase, consumed) {
+        if (!isDebugPanelVisible || !debugPanelEl) { return null; }
+        const list = debugPanelEl.querySelector('#ml-debug-events');
+        if (!list) { return null; }
+
+        let keyLabel = '';
+        if (event.type === 'mousedown' || event.type === 'mouseup' || event.type === 'click') {
+            const btn = event.button === 2 ? 'right' : (event.button === 1 ? 'middle' : 'left');
+            keyLabel = btn + ' btn';
+        } else if (event.type === 'contextmenu') {
+            keyLabel = 'right btn';
+        } else {
+            const parts = [];
+            if (event.metaKey)  { parts.push('⌘'); }
+            if (event.ctrlKey)  { parts.push('⌃'); }
+            if (event.altKey)   { parts.push('⌥'); }
+            if (event.shiftKey) { parts.push('⇧'); }
+            const k = event.key;
+            if (k && k !== 'Meta' && k !== 'Control' && k !== 'Alt' && k !== 'Shift') {
+                const norm = normalizeKeyForStorage(k);
+                if (norm) {
+                    const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, norm) ? KEY_GLYPHS[norm] : null;
+                    parts.push(glyph !== null ? glyph : (norm.length === 1 ? norm.toUpperCase() : norm));
+                } else {
+                    parts.push(k);
+                }
+            } else if (k) {
+                const modGlyphs = { 'Meta': '⌘', 'Control': '⌃', 'Alt': '⌥', 'Shift': '⇧' };
+                parts.push(modGlyphs[k] || k);
+            }
+            keyLabel = parts.join('+') || '?';
+        }
+
+        const phaseShort = phase.replace('down', '↓').replace('up', '↑');
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:2px 4px;font-size:11px;font-family:monospace;color:#f8f9fa;border-bottom:1px solid rgba(255,255,255,0.06);';
+
+        const left = document.createElement('span');
+        left.textContent = `${keyLabel}  ${phaseShort}`;
+        row.appendChild(left);
+
+        const right = document.createElement('span');
+        right.id = 'ml-debug-event-status-' + (++debugEventCounter);
+        if (consumed === true) {
+            right.textContent = 'consumed';
+            right.style.color = '#f87171';
+        } else if (consumed === false) {
+            right.textContent = 'passed';
+            right.style.color = '#86efac';
+        } else {
+            right.textContent = '…';
+            right.style.color = 'rgba(255,255,255,0.4)';
+        }
+        row.appendChild(right);
+
+        list.insertBefore(row, list.firstChild);
+
+        while (list.childElementCount > 30) {
+            list.removeChild(list.lastChild);
+        }
+
+        const fadeDelay = Math.max(0, DEBUG_EVENT_DISPLAY_MS - DEBUG_EVENT_FADEOUT_MS);
+        setTimeout(() => {
+            row.style.animation = `mlDebugEventFadeOut ${DEBUG_EVENT_FADEOUT_MS}ms linear forwards`;
+            setTimeout(() => { if (row.parentNode) { row.remove(); } }, DEBUG_EVENT_FADEOUT_MS);
+        }, fadeDelay);
+
+        return { row, statusEl: right };
+    }
+
+    /**
+     * Marks a previously-logged event row as consumed or passed.
+     * @param {{ row: HTMLElement, statusEl: HTMLElement }|null} handle
+     * @param {boolean} consumed
+     */
+    function markDebugEventStatus(handle, consumed) {
+        if (!handle || !handle.statusEl) { return; }
+        if (consumed) {
+            handle.statusEl.textContent = 'consumed';
+            handle.statusEl.style.color = '#f87171';
+        } else {
+            handle.statusEl.textContent = 'passed';
+            handle.statusEl.style.color = '#86efac';
+        }
+    }
+
+    /**
+     * Updates the static info rows (state, held keys, last action, cursor).
+     */
+    function updateDebugPanelState() {
+        if (!isDebugPanelVisible || !debugPanelEl) { return; }
+
+        const stateEl = debugPanelEl.querySelector('#ml-debug-state');
+        if (stateEl) {
+            let stateStr = 'idle';
+            if (recordingAction) {
+                stateStr = `recording: ${ACTION_LABELS[recordingAction] || recordingAction}`;
+            } else if (inferBufferActive) {
+                stateStr = `buffer active (${inferBufferLinks.length} links)`;
+            } else {
+                const advancing = Object.keys(chordProgress).filter((k) => !!chordProgress[k]);
+                if (advancing.length > 0) {
+                    stateStr = `chord advancing: ${advancing.join(', ')}`;
+                }
+            }
+            stateEl.textContent = stateStr;
+        }
+
+        const heldEl = debugPanelEl.querySelector('#ml-debug-held-keys');
+        if (heldEl) {
+            if (pressedKeys.size === 0) {
+                heldEl.textContent = '—';
+            } else {
+                heldEl.textContent = Array.from(pressedKeys).map((k) => {
+                    const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, k) ? KEY_GLYPHS[k] : null;
+                    return glyph !== null ? glyph : (k.length === 1 ? k.toUpperCase() : k);
+                }).join('  ');
+            }
+        }
+    }
+
+    /**
+     * Updates the last-action row with a label string.
+     * @param {string} label
+     */
+    function setDebugLastAction(label) {
+        if (!debugPanelEl) { return; }
+        const el = debugPanelEl.querySelector('#ml-debug-last-action');
+        if (el) { el.textContent = label; }
+    }
+
+    /**
+     * Throttled cursor-info update.
+     */
+    function updateDebugCursor() {
+        if (!isDebugPanelVisible || !debugPanelEl) { return; }
+        const el = debugPanelEl.querySelector('#ml-debug-cursor');
+        if (!el) { return; }
+        try {
+            const target = document.elementFromPoint(mouseX, mouseY);
+            const anchor = target ? target.closest('a') : null;
+            const url = anchor ? anchor.href : window.location.href;
+            const truncUrl = url ? url.substring(0, 70) : '—';
+            const kind = anchor ? 'anchor' : 'page';
+            el.textContent = `x:${mouseX}  y:${mouseY}  ${kind}: ${truncUrl}`;
+        } catch (e) {
+            el.textContent = `x:${mouseX}  y:${mouseY}`;
+        }
+    }
+
+    /**
+     * Builds and shows the debug panel. Idempotent.
+     */
+    function openDebugPanel() {
+        if (isDebugPanelVisible && debugPanelEl && document.body.contains(debugPanelEl)) { return; }
+        ensureTimerKeyframes();
+        isDebugPanelVisible = true;
+
+        if (!debugPanelEl) {
+            const panel = document.createElement('div');
+            panel.id = 'ml-debug-panel';
+            panel.style.cssText = [
+                'position:fixed',
+                'top:12px',
+                'right:12px',
+                'width:260px',
+                'background:rgba(17,17,27,0.92)',
+                'backdrop-filter:blur(6px)',
+                'border:1px solid rgba(255,255,255,0.15)',
+                'border-radius:8px',
+                'padding:10px 12px',
+                'z-index:1000002',
+                'font-family:sans-serif',
+                'color:#f8f9fa',
+                'box-shadow:0 4px 24px rgba(0,0,0,0.5)',
+                'max-height:80vh',
+                'overflow-y:auto',
+            ].join(';');
+
+            const header = document.createElement('div');
+            header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;';
+            const title = document.createElement('span');
+            title.textContent = '🔧 Debug';
+            title.style.cssText = 'font-size:12px;font-weight:700;letter-spacing:0.04em;color:#f8f9fa;';
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '✕';
+            closeBtn.style.cssText = 'background:none;border:none;color:rgba(255,255,255,0.5);font-size:12px;cursor:pointer;padding:0 2px;';
+            closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeDebugPanel(); });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            panel.appendChild(header);
+
+            function sectionLabel(text) {
+                const el = document.createElement('div');
+                el.textContent = text;
+                el.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);margin:8px 0 2px;';
+                return el;
+            }
+
+            function infoRow(labelText, id) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);';
+                const lbl = document.createElement('span');
+                lbl.textContent = labelText;
+                lbl.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.5);flex-shrink:0;margin-right:6px;';
+                const val = document.createElement('span');
+                val.id = id;
+                val.textContent = '—';
+                val.style.cssText = 'font-size:11px;color:#f8f9fa;text-align:right;word-break:break-all;';
+                row.appendChild(lbl);
+                row.appendChild(val);
+                return row;
+            }
+
+            panel.appendChild(sectionLabel('State'));
+            panel.appendChild(infoRow('script', 'ml-debug-state'));
+            panel.appendChild(infoRow('held keys', 'ml-debug-held-keys'));
+            panel.appendChild(infoRow('last action', 'ml-debug-last-action'));
+
+            panel.appendChild(sectionLabel('Cursor'));
+            const cursorRow = document.createElement('div');
+            cursorRow.style.cssText = 'padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);';
+            const cursorSpan = document.createElement('span');
+            cursorSpan.id = 'ml-debug-cursor';
+            cursorSpan.textContent = 'x:—  y:—  target:—';
+            cursorSpan.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.7);font-family:monospace;word-break:break-all;';
+            cursorRow.appendChild(cursorSpan);
+            panel.appendChild(cursorRow);
+
+            panel.appendChild(sectionLabel('Chord timers'));
+            panel.appendChild(createTimerRow('record',   'Record pause',    'CHORD_RECORD_TIMEOUT_MS',   CHORD_RECORD_TIMEOUT_MS));
+            panel.appendChild(createTimerRow('playback', 'Playback window', 'CHORD_PLAYBACK_TIMEOUT_MS', CHORD_PLAYBACK_TIMEOUT_MS));
+
+            const evtHeader = document.createElement('div');
+            evtHeader.style.cssText = 'display:flex;align-items:center;gap:4px;margin:8px 0 2px;';
+            const evtLabel = document.createElement('span');
+            evtLabel.textContent = 'EVENTS';
+            evtLabel.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);';
+            const helpBtn = document.createElement('button');
+            helpBtn.textContent = '?';
+            helpBtn.style.cssText = 'background:none;border:1px solid rgba(255,255,255,0.3);border-radius:50%;color:rgba(255,255,255,0.5);font-size:9px;width:14px;height:14px;cursor:pointer;line-height:1;padding:0;';
+            helpBtn.title = [
+                'consumed — script called preventDefault() on this event.',
+                '  The event stops here and is not delivered to the page.',
+                '',
+                'passed — script let this event through normally.',
+                '',
+                'Mouse down/up events are observed (debug-only listeners);',
+                '  the script never consumes them directly.',
+            ].join('\n');
+            evtHeader.appendChild(evtLabel);
+            evtHeader.appendChild(helpBtn);
+            panel.appendChild(evtHeader);
+
+            const eventList = document.createElement('div');
+            eventList.id = 'ml-debug-events';
+            eventList.style.cssText = 'max-height:180px;overflow-y:auto;';
+            panel.appendChild(eventList);
+
+            document.body.appendChild(panel);
+            debugPanelEl = panel;
+        } else {
+            document.body.appendChild(debugPanelEl);
+        }
+
+        updateDebugPanelState();
+        updateDebugCursor();
+    }
+
+    /** Hides the debug panel (keeps DOM intact so event list is preserved). */
+    function closeDebugPanel() {
+        isDebugPanelVisible = false;
+        if (debugPanelEl && debugPanelEl.parentNode) {
+            debugPanelEl.remove();
+        }
+    }
+
+    /** Toggles the debug panel. No-op when isDebug is false. */
+    function toggleDebugPanel() {
+        if (!isDebug) { return; }
+        if (isDebugPanelVisible) {
+            closeDebugPanel();
+        } else {
+            openDebugPanel();
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+
+    // ---- Debug panel capture listeners -----------------------------------------
+    // Registered before all other listeners so events are logged before any handler
+    // decides to consume them.
     document.addEventListener('keydown', (event) => {
-        if (event.key && event.key.length === 1) {
-            pressedKeys.add(event.key.toLowerCase());
-        }
+        if (!isDebugPanelVisible) { return; }
+        if (event.repeat) { return; }
+        debugLastKeyEventEl = logDebugEvent(event, 'keydown', null);
+        updateDebugPanelState();
     }, true);
-    
+
     document.addEventListener('keyup', (event) => {
-        if (event.key && event.key.length === 1) {
-            pressedKeys.delete(event.key.toLowerCase());
-        }
+        if (!isDebugPanelVisible) { return; }
+        logDebugEvent(event, 'keyup', null);
+        updateDebugPanelState();
+    }, true);
+
+    document.addEventListener('mousedown', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        logDebugEvent(event, 'mousedown', false);
+    }, true);
+
+    document.addEventListener('mouseup', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        logDebugEvent(event, 'mouseup', false);
+    }, true);
+
+    document.addEventListener('click', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        debugLastClickEventEl = logDebugEvent(event, 'click', null);
+    }, true);
+
+    document.addEventListener('contextmenu', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        debugLastClickEventEl = logDebugEvent(event, 'contextmenu', null);
+    }, true);
+    // ---------------------------------------------------------------------------
+
+    // Capture-phase key tracker — must be registered BEFORE handleKeydown so
+    // pressedKeys is current when handleKeydown runs.
+    log('Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)');
+
+    document.addEventListener('keydown', (event) => {
+        const storageKey = normalizeKeyForStorage(event.key);
+        if (storageKey) { pressedKeys.add(storageKey); }
+    }, true);
+
+    document.addEventListener('keyup', (event) => {
+        const storageKey = normalizeKeyForStorage(event.key);
+        if (storageKey) { pressedKeys.delete(storageKey); }
     }, true);
     log('Did add keydown listener for key tracking');
-    
+
     log('Registering keydown listener for Alt+M handler (registered SECOND so fires SECOND during capture)');
     document.addEventListener('keydown', handleKeydown, true);
     log('Did register keydown listener for Alt+M handler');
-    
+
+    // Bubble-phase keyup: finalize inferBuffer when any hold key is released.
     log('Will add keyup listener to track key releases');
     document.addEventListener('keyup', (event) => {
         logFunctionBegin('keyup tracker');
-        log(`Key released: ${event.key}, altKey=${event.altKey}`);
-        
-        // Debug: Log current state
-        console.log(`[MARKDOWN_LINKER_DEBUG] KeyUp: released=${event.key}, altKey=${event.altKey}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
-        
-        // Check if Alt+Z combo WAS active before this key release
-        // At keyup time: event.altKey is already false for the Alt key, so we check what's being released
-        // The buffer stays active while its trigger keys are held (this keyup already removed the
-        // released key from pressedKeys via the capture-phase tracker), so re-evaluate the binding.
-        const wasAltZActive = isAltZBufferActive;
-        const bufferStillHeld = isAltZBufferActive && actionMatchesClick('inferBuffer', bindingState(event));
-        
-        log(`Buffer still held: ${bufferStillHeld}, was active: ${wasAltZActive}`);
-        
-        // If Alt+Z combo was active and we're releasing Alt or Z, process buffer
-        if (wasAltZActive && !bufferStillHeld) {
-            log(`Alt+Z was deactivated, processing buffer with ${altZClickBuffer.length} buffered links`);
-            
-            // Deactivate buffer mode
-            isAltZBufferActive = false;
-            
-            if (altZClickBuffer.length > 0) {
-                log('Will compile buffered links into markdown list');
-                compileAndCopyBufferedLinks(altZClickBuffer);
-                // Clear buffer after processing
-                const count = altZClickBuffer.length;
-                altZClickBuffer = [];
-                log(`Did process ${count} links and clear buffer`);
-            } else {
-                log('Buffer is empty, nothing to copy');
-            }
-        } else {
-            log('Alt+Z was not active or combo still active, skipping buffer processing');
+        if (!inferBufferActive) {
+            logFunctionEnd('keyup tracker');
+            return;
         }
-        
+        log(`Key released during buffer: key=${event.key}, links=${inferBufferLinks.length}`);
+
+        let shouldFinalize = false;
+
+        // Check modifier hold keys (event.key is the modifier name when a modifier key fires).
+        if (event.key === 'Meta'    && inferBufferHoldMeta)  { shouldFinalize = true; }
+        if (event.key === 'Control' && inferBufferHoldCtrl)  { shouldFinalize = true; }
+        if (event.key === 'Alt'     && inferBufferHoldAlt)   { shouldFinalize = true; }
+        if (event.key === 'Shift'   && inferBufferHoldShift) { shouldFinalize = true; }
+
+        // Check non-modifier hold keys (e.g. 'z').
+        if (!shouldFinalize) {
+            const releasedKey = normalizeKeyForStorage(event.key);
+            if (releasedKey && inferBufferHoldKeys.has(releasedKey)) {
+                shouldFinalize = true;
+            }
+        }
+
+        if (shouldFinalize) {
+            log(`Hold key released (${event.key}), finalizing buffer`);
+            finalizeInferBuffer();
+        }
+
         logFunctionEnd('keyup tracker');
-    }, false);  // Use bubble phase (false) so it fires AFTER capture phase handlers
+    }, false);  // bubble phase — fires AFTER capture-phase key-tracker removes the key from pressedKeys
     log('Did add keyup listener for key tracking');
 
     // ============================================================================
