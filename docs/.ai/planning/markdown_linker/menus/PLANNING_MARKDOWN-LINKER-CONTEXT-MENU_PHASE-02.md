@@ -52,7 +52,7 @@
 Here is an example screenshot that I captrued from firefox' context menu:
 <img alt="alt text" src="images/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-02/Firefox_20260619110945.png" width="500">
 
-* This version of the menu should also render/use the nesting defined in `docs/ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.json5`
+* This version of the menu should also render/use the nesting defined in `docs/.ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.json5`
 
 * IE you would only see the level 1 items at first (the `--- TITLE ---` items in this example)
 

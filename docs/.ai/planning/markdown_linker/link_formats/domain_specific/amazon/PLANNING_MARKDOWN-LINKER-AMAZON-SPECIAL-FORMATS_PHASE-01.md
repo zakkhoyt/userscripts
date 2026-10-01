@@ -43,12 +43,12 @@ using the following files/data:
 
 ### References:
 * To learn more about amazon product urls:
-  * see: `docs/ai/planning/markdown_linker/planning_references/notes/amazon/coding/**/*`
+  * see: `docs/.ai/planning/markdown_linker/planning_references/notes/amazon/coding/**/*`
     * expecially: `AMAZON_URL_ANATOMY.md`
 * Also read through the amazon_toolkit code and comments. They might contain refined info 
 
 * I saved the web page's source code using a few different methods (i'm not sure which is more complete or which I should prefer)
-  * See: `docs/ai/planning/markdown_linker/planning_references/amazon_html/purple_tape/README.md` -->
+  * See: `docs/.ai/planning/markdown_linker/planning_references/.gitignored/amazon_html/purple_tape/README.md` -->
 
 
 
@@ -101,7 +101,7 @@ When the url is an amazon product url, I want the popup menu to contain a couple
 
 ## Page Source Code
 * I saved the web page's source code using a few different methods (i'm not sure which is more complete or which I should prefer)
-  * See: `docs/ai/planning/markdown_linker/planning_references/amazon_html/purple_tape/README.md` -->
+  * See: `docs/.ai/planning/markdown_linker/planning_references/.gitignored/amazon_html/purple_tape/README.md` -->
 
 ---
 
@@ -111,7 +111,7 @@ I did some investigating
 
 * color: blue, size: 11 yards
   * URL: `https://www.amazon.com/dp/B0G2WTDLXS?th=1`
-  * source: `docs/ai/planning/markdown_linker/planning_references/amazon_html/purple_tape/blue_11_yards.html`
+  * source: `docs/.ai/planning/markdown_linker/planning_references/.gitignored/amazon_html/purple_tape/blue_11_yards.html`
   * price: 
     * location A HTML: `<span aria-hidden="true"><span class="a-price-symbol">$</span><span class="a-price-whole">9<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span></span>`
       * above delivery date
@@ -131,13 +131,13 @@ I did some investigating
 
 * color: blue, size: 15 yards
   * url: `https://www.amazon.com/dp/B0C9GJC6P3?th=1`
-  * source: `docs/ai/planning/markdown_linker/planning_references/amazon_html/purple_tape/blue_15_yards.html`
+  * source: `docs/.ai/planning/markdown_linker/planning_references/.gitignored/amazon_html/purple_tape/blue_15_yards.html`
 * color: beige, size: 11 yards
   * url: `https://www.amazon.com/dp/B0G2WNYVBZ?th=1`
-  * source: `docs/ai/planning/markdown_linker/planning_references/amazon_html/purple_tape/beige_11_yards.html`
+  * source: `docs/.ai/planning/markdown_linker/planning_references/.gitignored/amazon_html/purple_tape/beige_11_yards.html`
 * color: beige, size: 15 yards
   * url: `https://www.amazon.com/dp/B0DF7MW3SG?th=1`
-  * source: `docs/ai/planning/markdown_linker/planning_references/amazon_html/purple_tape/beige_15_yards.html`
+  * source: `docs/.ai/planning/markdown_linker/planning_references/.gitignored/amazon_html/purple_tape/beige_15_yards.html`
 
 
 # Product Variants
@@ -146,7 +146,7 @@ I did some investigating
 
 > [!NOTE]
 > I do recall that soem products work this way and I think others might actually work with query parameters.
-> Please re-read `docs/ai/planning/markdown_linker/planning_references/notes/amazon/coding/**/*` to see what you can find. 
+> Please re-read `docs/.ai/planning/markdown_linker/planning_references/notes/amazon/coding/**/*` to see what you can find. 
 
 Anyhow I did some digging
 

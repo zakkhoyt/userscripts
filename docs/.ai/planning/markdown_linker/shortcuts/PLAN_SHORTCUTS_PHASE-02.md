@@ -69,8 +69,8 @@ Here are some examples I'm picturing
 
 *References*
 See my notes on keyboards & keyboard shortcuts
-* `docs/ai/planning/markdown_linker/planning_references/notes/keyboards/**/*`
-* `docs/ai/planning/markdown_linker/planning_references/notes/keyboards/MACOS_KEYBOARD_SHORTCUTS.md` discussed `chords`
+* `docs/.ai/planning/markdown_linker/planning_references/notes/keyboards/**/*`
+* `docs/.ai/planning/markdown_linker/planning_references/notes/keyboards/MACOS_KEYBOARD_SHORTCUTS.md` discussed `chords`
 
 
 
@@ -92,8 +92,8 @@ See my notes on keyboards & keyboard shortcuts
 
 
 # Action Items
-* I'd like you to research and draft a document about EXANDED_KEYBOARD_SHORTCUTS
-* Use the claude skill `/write-markdown` (`~/.claude/skills/write-markdown/`) to research and draft a document: `~/conductor/workspaces/userscripts/albuquerque/docs/ai/planning/markdown_linker/shortcuts/EXANDED_KEYBOARD_SHORTCUTS.md` to address all ideas above. summarize in chat
+* I'd like you to research and draft a document about EXPANDED_KEYBOARD_SHORTCUTS
+* Use the claude skill `/write-markdown` (`~/.claude/skills/write-markdown/`) to research and draft a document: `~/conductor/workspaces/userscripts/albuquerque/docs/.ai/planning/markdown_linker/shortcuts/EXPANDED_KEYBOARD_SHORTCUTS.md` to address all ideas above. summarize in chat
 * Include an H1 section (with nested subsections) about each topic above
   * at the top of the section: summarize my question with light contexgt
   * at the top of the section: A succinct/direct answer
@@ -395,9 +395,9 @@ Not only that, but the should all work with `Buffer links (hold + click)`
 
 * I believe we might have some support for this built in at this point... maybe
 * I had written some planning docs about nested popup menus here
-  * here is a json5 file that I wrote to help express what I'm after with the menus: `docs/ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.json5`
-  * This plan file mentions the json5, and is commented out (which is how I mark these H1 sections as "done"): `/Users/zakkhoyt/conductor/workspaces/userscripts/albuquerque/docs/ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.md`
-  * These plans are still not commented out (indicatign they are not likely finished yet): `/Users/zakkhoyt/conductor/workspaces/userscripts/albuquerque/docs/ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-02.md`
+  * here is a json5 file that I wrote to help express what I'm after with the menus: `docs/.ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.json5`
+  * This plan file mentions the json5, and is commented out (which is how I mark these H1 sections as "done"): `/Users/zakkhoyt/conductor/workspaces/userscripts/albuquerque/docs/.ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.md`
+  * These plans are still not commented out (indicatign they are not likely finished yet): `/Users/zakkhoyt/conductor/workspaces/userscripts/albuquerque/docs/.ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-02.md`
   * Please analyze these files, the current code, etc.. to see what has been implemented and not yet. Also check GitHub for unmerged PRs
 
 

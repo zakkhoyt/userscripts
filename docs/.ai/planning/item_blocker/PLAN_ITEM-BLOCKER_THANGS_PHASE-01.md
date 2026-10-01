@@ -11,8 +11,8 @@
 !!! info Info
     * For the topics below, I've done a little digging into the HTML for a particular search result
     * I've saved a couple versions of the web page into this repo. I'm not sure if the first (simpler) one is adequate, or if the second one is needed (in order for the agent to do some digging)
-      * `docs/ai/planning/item_blocker/input/ps5_wall_mount/**/*`
-      * `docs/ai/planning/item_blocker/input/ps5_wall_mount_complete/**/*`
+      * `docs/.ai/planning/item_blocker/.gitignored/input/ps5_wall_mount/**/*`
+      * `docs/.ai/planning/item_blocker/.gitignored/input/ps5_wall_mount_complete/**/*`
 
 
 ## Detect and suppress "Bundle" search result items

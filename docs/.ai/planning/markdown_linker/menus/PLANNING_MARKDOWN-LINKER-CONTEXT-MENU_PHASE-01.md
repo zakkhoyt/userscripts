@@ -54,7 +54,7 @@
 ## Examples
 
 * This json5 document describes how I'd like the menus to appear and behave: 
-  * `docs/ai/planning/markdown_linker/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.json5`
+  * `docs/.ai/planning/markdown_linker/menus/PLANNING_MARKDOWN-LINKER-CONTEXT-MENU_PHASE-01.json5`
   * Please validate the
 
 * The below examples are approximate and will contain different entries depending on:

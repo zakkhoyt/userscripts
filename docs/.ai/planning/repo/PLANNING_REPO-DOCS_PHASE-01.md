@@ -8,7 +8,7 @@ I doubt any of the AI chat sessions are still accessible on this machine, so I'l
 
 # Agent Boostrapping
 In order to understand what this repostiory is:
-* Read `docs/ai/GUIDE.md` in the repo root
+* Read `docs/.ai/GUIDE.md` in the repo root
 * Read `README.md` in the repo root
 * Read *all* files in this repo to understand what the code is for, best practices, etc..
 * Read git commit history as well to understand what has been changed and what was last being worked on. 
@@ -60,7 +60,7 @@ First let me make sure i'm understanding something
   * I thought bundler/src is a read-only dir? 
     * if not, why do we have both files?
     * Why are both files modified in the current PR?
-* Write a new doc: `docs/ai/bundler/ABOUT_BUNDLER.md` that explains every thing above and more. 
+* Write a new doc: `docs/bundler/ABOUT_BUNDLER.md` that explains every thing above and more. 
 
 
 
