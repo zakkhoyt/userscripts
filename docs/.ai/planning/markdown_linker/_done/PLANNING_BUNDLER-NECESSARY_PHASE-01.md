@@ -1,4 +1,4 @@
-
+<!-- 
 # bundling vs linking/loading
 * Today I want to resume working on `markdown_linker/markdown_linker.user.js.md`
 * One of the things that the agent and I were working on was:
@@ -29,4 +29,4 @@
 * I noticed this new feature in violentmonkey: [Inject scripts into different contexts](https://violentmonkey.github.io/posts/inject-into-context/) 
   * Does this have to do with our bundling problem?
   * Please summarize what this new feature is good for and what we could do with it. 
-
+ -->

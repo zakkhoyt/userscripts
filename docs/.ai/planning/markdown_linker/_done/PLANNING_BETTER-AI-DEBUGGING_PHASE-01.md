@@ -1,3 +1,6 @@
+
+
+<!-- 
 # Better AI Debugging
 
 The problems: Right now I have to manually:
@@ -23,4 +26,4 @@ The problems: Right now I have to manually:
 # ./violentmonkey.zsh is supposed to open a page of a matching domain. 
 * I thought this was working for sure at some point but I don't notice it do so now. 
 * I recall us defining and adding some customized meta/header comment to the userscript or somethign liek that. 
-  * Maybe our bundler step is stripping it out?
+  * Maybe our bundler step is stripping it out? -->
