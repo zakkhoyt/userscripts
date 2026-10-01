@@ -1,23 +1,59 @@
 
 
 
+---
+
+<!-- # Redefine the formats and variants of link.title -->
+# Add a new option to link title formatting
+
+The current options for `common` link title formats are (not sure what they are called in code)
+* page title
+* url forwared
+* url reverse
+* meta description
+
+I want us to add a new / additional format. We can call it `domain based` or something like that
 
 
+## Popup 
+Meaning a new entry to this popup section
 
+<img alt="Firefox_20261001144316.png" src="images/PLAN_PHASE-10_LINK-TITLE-COMMON/Firefox_20261001144316.png" width="500"><br>
 
-# Redefine the formats and variants of link.title
+## Format Syntax
 
 * `[${url.hostname}: $(extractPageTitle)](${url})`
+
+
+## Examples (common)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 
 # Screenshots of Current Link Titles
-* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-01/popup_menu_amazon.png" width="200"> 
-* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-01/popup_menu_github.png" width="200">
-* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-01/popup_menu_jira.png" width="200">
-* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-01/popup_menu_youtube.png" width="200">
-* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-01/popup_menu_appledocs.png" width="200">
+* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-04/popup_menu_amazon.png" width="200"> 
+* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-04/popup_menu_github.png" width="200">
+* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-04/popup_menu_jira.png" width="200">
+* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-04/popup_menu_youtube.png" width="200">
+* <img src="images/PLANNING_MARKDOWN-LINKER-LINK-TITLE_PHASE-04/popup_menu_appledocs.png" width="200">
 
 
 ## title format rules
