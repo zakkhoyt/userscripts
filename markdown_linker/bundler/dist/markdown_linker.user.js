@@ -3195,7 +3195,15 @@ ${textLink}`;
         if (!Number.isFinite(seconds) || seconds <= 0) {
           return null;
         }
-        return `t=${Math.floor(seconds)}s`;
+        const wholeSeconds = Math.floor(seconds);
+        const hours = Math.floor(wholeSeconds / 3600);
+        const minutes = Math.floor(wholeSeconds % 3600 / 60);
+        const secs = wholeSeconds % 60;
+        const pad = (value) => value.toString().padStart(2, "0");
+        if (hours > 0) {
+          return `t=${hours}h${pad(minutes)}m${pad(secs)}s`;
+        }
+        return `t=${pad(minutes)}m${pad(secs)}s`;
       }
       module.exports = {
         secondsToTimestamp,
@@ -4237,6 +4245,21 @@ ${textLink}`;
       }
       return `${paddedMinutes}:${paddedSeconds}`;
     }
+    function formatSecondsAsUrlTimestamp(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        return null;
+      }
+      const totalSeconds = Math.floor(seconds);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor(totalSeconds % 3600 / 60);
+      const secs = totalSeconds % 60;
+      const paddedMinutes = String(minutes).padStart(2, "0");
+      const paddedSeconds = String(secs).padStart(2, "0");
+      if (hours > 0) {
+        return `${hours}h${paddedMinutes}m${paddedSeconds}s`;
+      }
+      return `${paddedMinutes}m${paddedSeconds}s`;
+    }
     function isLikelyYouTubeDescription(candidate) {
       if (!candidate) {
         return false;
@@ -4470,7 +4493,7 @@ ${textLink}`;
       const timestampDisplay = formatSecondsAsTimestamp(seconds) || `${Math.floor(seconds)}s`;
       const decoratedBaseTitle = baseTitle || context.video.title || "YouTube Video";
       const decoratedTitle = `${decoratedBaseTitle} @ ${timestampDisplay}`;
-      const timestampUrl = buildYouTubeTimestampUrl(shortBase, `${Math.floor(seconds)}`);
+      const timestampUrl = buildYouTubeTimestampUrl(shortBase, formatSecondsAsUrlTimestamp(seconds) || `${Math.floor(seconds)}s`);
       if (!timestampUrl) {
         log("Failed to build timestamp URL");
         logFunctionEnd("buildYouTubeTimestampMenuOptions");

@@ -802,6 +802,37 @@
     }
 
     /**
+     * Formats a playback offset as a YouTube `t=` parameter value using the readable
+     * `##h##m##s` form instead of a bare seconds count.
+     *
+     * A bare `t=555` is opaque to a human reading the link; `t=09m15s` is not. YouTube
+     * accepts both, plus zero-padded variants (`t=0h09m15s`, `t=0000h0009m15s`).
+     *
+     * Mirrors `formatSecondsAsTimestamp()` component-for-component so the URL and the
+     * link title never disagree — `09:15` pairs with `09m15s`, `1:02:03` with `1h02m03s`.
+     * The hours component is omitted when zero, matching the clock display.
+     *
+     * @param {number} seconds - Playback offset in seconds
+     * @returns {string|null} Parameter value (examples: `45s`, `09m15s`, `1h02m03s`), or null when invalid
+     * Reference: https://support.google.com/youtube/answer/57792
+     */
+    function formatSecondsAsUrlTimestamp(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) {
+            return null;
+        }
+        const totalSeconds = Math.floor(seconds);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+        const paddedMinutes = String(minutes).padStart(2, '0');
+        const paddedSeconds = String(secs).padStart(2, '0');
+        if (hours > 0) {
+            return `${hours}h${paddedMinutes}m${paddedSeconds}s`;
+        }
+        return `${paddedMinutes}m${paddedSeconds}s`;
+    }
+
+    /**
      * Heuristically determines whether a supposed YouTube title is actually a description blob
      * @param {string|null} candidate - Title text to inspect
      * @returns {boolean} True when text looks like a description paragraph
@@ -1050,7 +1081,7 @@
     /**
      * Appends (or replaces) the t= query parameter in a URL for timestamp links
      * @param {string} baseUrl - URL to modify
-     * @param {string} timestampValue - Value for the t parameter (examples: 283, 283s, 4m43s)
+     * @param {string} timestampValue - Value for the t parameter (examples: 45s, 04m43s, 1h02m03s)
      * @returns {string|null} URL with timestamp parameter applied
      */
     function buildYouTubeTimestampUrl(baseUrl, timestampValue) {
@@ -1109,7 +1140,7 @@
         const timestampDisplay = formatSecondsAsTimestamp(seconds) || `${Math.floor(seconds)}s`;
         const decoratedBaseTitle = baseTitle || context.video.title || 'YouTube Video';
         const decoratedTitle = `${decoratedBaseTitle} @ ${timestampDisplay}`;
-        const timestampUrl = buildYouTubeTimestampUrl(shortBase, `${Math.floor(seconds)}`);
+        const timestampUrl = buildYouTubeTimestampUrl(shortBase, formatSecondsAsUrlTimestamp(seconds) || `${Math.floor(seconds)}s`);
         if (!timestampUrl) {
             log('Failed to build timestamp URL');
             logFunctionEnd('buildYouTubeTimestampMenuOptions');
