@@ -8,7 +8,7 @@ I doubt any of the AI chat sessions are still accessible on this machine, so I'l
 
 # Agent Boostrapping
 In order to understand what this repostiory is:
-* Read `docs/.ai/GUIDE.md` in the repo root
+* Read `docs/ai/GUIDE.md` in the repo root
 * Read `README.md` in the repo root
 * Read *all* files in this repo to understand what the code is for, best practices, etc..
 * Read git commit history as well to understand what has been changed and what was last being worked on. 

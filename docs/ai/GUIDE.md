@@ -93,13 +93,25 @@ albuquerque/
 │       └── loading_libraries_from_violentmonkey.md
 │
 ├── docs/
-│   ├── ai/
-│   │   └── GUIDE.md                   ← this file (AI agent bootstrapping)
+│   ├── ai/                            ← AGENT-FACING docs — read these
+│   │   ├── GUIDE.md                   ← this file (AI agent bootstrapping)
+│   │   └── USERSCRIPT_CONVENTIONS_SETUP.md  ← how the AI instruction files fit together
+│   ├── .ai/                           ← the AUTHOR's AI planning material (dot-prefixed)
+│   │   └── planning/                  ← plans, sequencing, references, assets
+│   │       ├── markdown_linker/       ← per-script planning docs + images
+│   │       ├── item_blocker/
+│   │       ├── repo/
+│   │       └── violentmonkey_script/
+│   ├── bundler/
+│   │   └── ABOUT_BUNDLER.md           ← how markdown_linker is built & deployed
+│   ├── ideas/IDEAS.md                 ← product ideas, not yet planned
 │   ├── images/icons/
 │   │   ├── amazon.png                 ← icon for inline prefixes in markdown
 │   │   └── youtube.png                ← icon for inline prefixes in markdown
 │   ├── notes/amazon_url/              ← Amazon URL anatomy, image URL reference
+│   ├── references/                    ← external code references
 │   └── todo/
+│       ├── UPDATE_AI_INSTRUCTIONS.md  ← open TODOs for the AI instruction files
 │       └── USERSCRIPT_REPO.md         ← open repo-level TODOs
 │
 ├── images/                            ← screenshots used in README.md

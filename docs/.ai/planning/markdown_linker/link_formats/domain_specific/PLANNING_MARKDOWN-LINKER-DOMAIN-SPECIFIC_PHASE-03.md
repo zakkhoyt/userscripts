@@ -6,7 +6,7 @@
   * If checkmark list items are marked with an X, they are complete
   * If any markdown is commented out that means it is complete, however the inverse is not always true (some uncommented items might actually be completed already)
 * You'll need to re-read the code under:
-  * `docs/.ai/GUIDE.md`
+  * `docs/ai/GUIDE.md`
   * `markdown_linker/**/*`
   * `common/**/*`
 * Please read (not write) these files then compare against the current state of the code:
