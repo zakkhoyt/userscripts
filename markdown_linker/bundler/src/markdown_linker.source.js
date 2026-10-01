@@ -2,7 +2,7 @@
 // @name         Markdown Linker
 // @namespace    https://github.com/zakkhoyt/greasemonkey/markdown_linker
 // @version      1.0.0
-// @description  Convert URLs to markdown links with Alt+Click, Alt+Right-Click, Alt+M, or M key
+// @description  Convert URLs to markdown links — configurable key triggers (defaults: V=menu, B=quiet copy, hold Z+click=buffer)
 // @downloadURL  https://raw.githubusercontent.com/zakkhoyt/userscripts/zakk/markdown_linker_domains/markdown_linker/markdown_linker.user.js
 // @updateURL    https://raw.githubusercontent.com/zakkhoyt/userscripts/zakk/markdown_linker_domains/markdown_linker/markdown_linker.user.js
 // @author       Zakk Hoyt
@@ -12,14 +12,16 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_unregisterMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
 
 // Development targets consumed by scripts/violentmonkey/violentmonkey.zsh
 // #dev-open https://developer.mozilla.org/en-US/docs/Web/API/Selection
-// ##dev-open https://www.youtube.com/watch?v=aqz-KE-bpKQ
-// ##dev-open https://www.youtube.com/playlist?list=PL590L5WQmH8cDj0KQvhZpW7x1YgnPZXoq
+// // #dev-open https://www.youtube.com/watch?v=aqz-KE-bpKQ
+// // out*/ #dev-open https://www.youtube.com/playlist?list=PL590L5WQmH8cDj0KQvhZpW7x1YgnPZXoq
 
 /*
  * Markdown Linker - ViolentMonkey Userscript
@@ -86,13 +88,17 @@
     // CONFIGURATION
     // ============================================================================
     
-    // Enable debug mode to show error dialogs with debugger option
-    // Type: boolean
-    const isDebug = true;
+    // Debug mode — controls console logging and reveals the Developer popup section.
+    // Loaded from storage at startup; default false. Changed via Settings panel/popup.
+    // Type: boolean (mutable — loaded and toggled at runtime)
+    let isDebug = false;
     
     // Script identifier prefix for all console.log statements
     // Type: string
     let logBase = "markdown_linker";
+
+    // The currently visible notification element, so an async capture result can append a 2nd line.
+    let activeNotification = null;
     
     // Reference to currently displayed popup menu DOM element
     // Tracked globally to enable removal when user clicks outside or selects option
@@ -149,7 +155,11 @@
         lastSelectionTimestamp = Date.now();
     });
 
-    // Alt+Z title preference options (first element is default)
+    // Debug-mode storage key
+    const IS_DEBUG_PREF_KEY = 'markdown_linker.is_debug';
+
+    // Quick-copy title preference options (first element is default).
+    // Storage key kept as-is for backward compatibility with saved preferences.
     const ALT_Z_TITLE_PREF_KEY = 'markdown_linker.altz_title_source';
     const ALT_Z_TITLE_OPTIONS = [
         { id: 'url-forward', label: 'URL (forward)' },
@@ -158,8 +168,55 @@
         { id: 'page', label: 'Page title' }
     ];
     let altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
-    let altZMenuCommandId = null;
+
+    // Source-capture preference: when "html & logs", every clipboard copy also POSTs the page
+    // source + session logs to the local capture server (scripts/source_capture). Default: none.
+    const CAPTURE_MODE_PREF_KEY = 'markdown_linker.capture_mode';
+    const CAPTURE_MODE_OPTIONS = [
+        { id: 'none', label: 'none' },
+        { id: 'html_logs', label: 'html & logs' }
+    ];
+    let captureMode = CAPTURE_MODE_OPTIONS[0].id;
+    let captureMenuCommandId = null;
+
+    // ---- Chord/debug timing constants ----
+    const CHORD_RECORD_TIMEOUT_MS   = 500;   // recording between-term pause
+    const CHORD_PLAYBACK_TIMEOUT_MS = 1500;  // playback chord inactivity window
+    const DEBUG_EVENT_DISPLAY_MS    = 1500;  // how long event rows stay visible
+    const DEBUG_EVENT_FADEOUT_MS    = 300;   // fade animation duration (subset of above)
+
+    // ---- Configurable triggers (replaces the hard-coded Alt modifier) ----
+    // A binding = { modifiers:{meta,ctrl,alt,shift}, keys:[lowercase chars], requiresClick }.
+    // Modifiers are read from the event; regular keys from the `pressedKeys` set. `fn` is NOT
+    // supported (browsers don't expose it). Defaults avoid Alt (unreliable on macOS) and use keys
+    // that are unbound in the YouTube player and in Firefox: V (menu), B (quiet copy), Z (buffer).
+    const TRIGGERS_PREF_KEY = 'markdown_linker.triggers';
+    const DEFAULT_TRIGGERS = {
+        menu:            [{ modifiers: {}, keys: ['v'], requiresClick: false }],  // hover + V -> open menu
+        inferQuiet:      [{ modifiers: {}, keys: ['b'], requiresClick: false }],  // hover + B -> copy one link
+        inferBuffer:     [{ modifiers: {}, keys: ['z'], requiresClick: true  }],  // hold Z + click… -> buffer list
+        openSettings:    [],                                                       // no default — user records their own
+        toggleDebugPanel: []                                                       // no default — user records their own
+    };
+    let triggers = cloneTriggers(DEFAULT_TRIGGERS);
     // ============================================================================
+
+    /**
+     * Mirrors a formatted log line into the SourceCapture buffer (when present) so captured `.log`
+     * files reflect the full session. Buffers regardless of `isDebug` (so captures are complete even
+     * when console logging is off). Safe no-op when the capture module is unavailable.
+     * @param {string} line - Already-formatted log line
+     */
+    function bufferLog(line) {
+        try {
+            if (typeof window !== 'undefined' && window.SourceCapture && window.SourceCapture.logBuffer) {
+                // Prefix each captured log line with an ISO timestamp (console output stays unprefixed).
+                window.SourceCapture.logBuffer.push(`${new Date().toISOString()} ${line}`);
+            }
+        } catch (error) {
+            /* noop — logging must never throw */
+        }
+    }
 
     /**
      * Simple logging wrapper with consistent prefix
@@ -167,8 +224,10 @@
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Console/log
      */
     function log(message) {
+        const line = `${logBase}: ${message}`;
+        bufferLog(line);
         if (isDebug) {
-            console.log(`${logBase}: ${message}`);
+            console.log(line);
         }
     }
 
@@ -178,7 +237,9 @@
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Console/warn
      */
     function logWarn(message) {
-        console.warn(`${logBase}: ${message}`);
+        const line = `${logBase}: ${message}`;
+        bufferLog(`WARN ${line}`);
+        console.warn(line);
     }
 
     /**
@@ -187,7 +248,9 @@
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Console/error
      */
     function logError(message) {
-        console.error(`${logBase}: ${message}`);
+        const line = `${logBase}: ${message}`;
+        bufferLog(`ERROR ${line}`);
+        console.error(line);
     }
 
     /**
@@ -195,8 +258,10 @@
      * @param {string} functionName - Name of the function being entered
      */
     function logFunctionBegin(functionName) {
+        const line = `${logBase}: begin ${functionName}`;
+        bufferLog(line);
         if (isDebug) {
-            console.log(`${logBase}: begin ${functionName}`);
+            console.log(line);
         }
     }
 
@@ -205,8 +270,10 @@
      * @param {string} functionName - Name of the function being exited
      */
     function logFunctionEnd(functionName) {
+        const line = `${logBase}: end ${functionName}`;
+        bufferLog(line);
         if (isDebug) {
-            console.log(`${logBase}: end ${functionName}`);
+            console.log(line);
         }
     }
 
@@ -222,11 +289,11 @@
     }
 
     // ============================================================================
-    // USER PREFERENCES (ALT+Z TITLE SOURCE)
+    // USER PREFERENCES (QUICK-COPY TITLE SOURCE)
     // ============================================================================
 
     /**
-     * Finds the metadata for a given Alt+Z title option ID
+     * Finds the metadata for a given quick-copy title option ID
      * @param {string} optionId - Identifier stored in preferences
      * @returns {{id: string, label: string}} Matching option (defaults if not found)
      */
@@ -235,8 +302,8 @@
     }
 
     /**
-     * Loads the persisted Alt+Z title preference from ViolentMonkey storage
-     * Falls back to default when storage is unavailable or value is invalid
+     * Loads the persisted quick-copy title preference from ViolentMonkey storage.
+     * Falls back to default when storage is unavailable or value is invalid.
      * @returns {string} Option ID representing the user's preference
      */
     function loadAltZTitlePreference() {
@@ -247,22 +314,22 @@
             try {
                 storedValue = GM_getValue(ALT_Z_TITLE_PREF_KEY, storedValue);
             } catch (error) {
-                logWarn(`Failed to load Alt+Z preference: ${error}`);
+                logWarn(`Failed to load quick-copy title preference: ${error}`);
             }
         }
 
         if (!ALT_Z_TITLE_OPTIONS.some((option) => option.id === storedValue)) {
-            logWarn(`Alt+Z preference "${storedValue}" invalid, reverting to default`);
+            logWarn(`Quick-copy title preference "${storedValue}" invalid, reverting to default`);
             storedValue = ALT_Z_TITLE_OPTIONS[0].id;
         }
 
-        log(`Loaded Alt+Z title preference: ${storedValue}`);
+        log(`Loaded quick-copy title preference: ${storedValue}`);
         logFunctionEnd('loadAltZTitlePreference');
         return storedValue;
     }
 
     /**
-     * Persists the current Alt+Z preference and refreshes the menu command label
+     * Persists the current quick-copy title preference and refreshes the settings panel if open.
      */
     function persistAltZTitlePreference() {
         logFunctionBegin('persistAltZTitlePreference');
@@ -270,65 +337,207 @@
             try {
                 GM_setValue(ALT_Z_TITLE_PREF_KEY, altZTitlePreference);
             } catch (error) {
-                logWarn(`Failed to persist Alt+Z preference: ${error}`);
+                logWarn(`Failed to persist quick-copy title preference: ${error}`);
             }
         }
-        registerAltZTitleMenuCommand();
+        refreshSettingsPanel();
         logFunctionEnd('persistAltZTitlePreference');
     }
 
     /**
-     * Registers (or re-registers) the ViolentMonkey menu command for cycling Alt+Z sources
-     */
-    function registerAltZTitleMenuCommand() {
-        logFunctionBegin('registerAltZTitleMenuCommand');
-        if (typeof GM_registerMenuCommand !== 'function') {
-            log('GM_registerMenuCommand unavailable, skipping menu registration');
-            logFunctionEnd('registerAltZTitleMenuCommand');
-            return;
-        }
-
-        if (altZMenuCommandId && typeof GM_unregisterMenuCommand === 'function') {
-            try {
-                GM_unregisterMenuCommand(altZMenuCommandId);
-            } catch (error) {
-                logWarn(`Failed to unregister previous menu command: ${error}`);
-            }
-        }
-
-        const optionLabel = getAltZOption(altZTitlePreference).label;
-        const menuLabel = `Alt+Z title: ${optionLabel} (click to cycle)`;
-        altZMenuCommandId = GM_registerMenuCommand(menuLabel, cycleAltZTitlePreference);
-        logFunctionEnd('registerAltZTitleMenuCommand');
-    }
-
-    /**
-     * Cycles through Alt+Z title options and persists the newly selected value
+     * Advances to the next quick-copy title option, persists, and notifies the user.
      */
     function cycleAltZTitlePreference() {
         logFunctionBegin('cycleAltZTitlePreference');
         const currentIndex = ALT_Z_TITLE_OPTIONS.findIndex((option) => option.id === altZTitlePreference);
         const nextIndex = (currentIndex + 1) % ALT_Z_TITLE_OPTIONS.length;
         altZTitlePreference = ALT_Z_TITLE_OPTIONS[nextIndex].id;
-        log(`Alt+Z preference changed to: ${altZTitlePreference}`);
+        log(`Quick-copy title preference changed to: ${altZTitlePreference}`);
         persistAltZTitlePreference();
         const optionLabel = getAltZOption(altZTitlePreference).label;
-        showNotification(`Alt+Z title source: ${optionLabel}`);
+        showNotification(`Quick-copy title: ${optionLabel}`);
         logFunctionEnd('cycleAltZTitlePreference');
     }
 
     /**
-     * Initializes Alt+Z preference state and registers control surfaces
+     * Initializes quick-copy title preference state from storage.
      */
     function initializeAltZPreference() {
         logFunctionBegin('initializeAltZPreference');
         altZTitlePreference = loadAltZTitlePreference();
-        registerAltZTitleMenuCommand();
         logFunctionEnd('initializeAltZPreference');
     }
 
+    // ============================================================================
+    // USER PREFERENCES (DEBUG MODE)
+    // ============================================================================
+
+    /**
+     * Loads the persisted debug-mode flag from ViolentMonkey storage (defaults to false).
+     * @returns {boolean}
+     */
+    function loadIsDebug() {
+        logFunctionBegin('loadIsDebug');
+        let stored = false;
+        if (typeof GM_getValue === 'function') {
+            try {
+                stored = GM_getValue(IS_DEBUG_PREF_KEY, false);
+            } catch (error) {
+                // logWarn not yet safe here — just swallow
+            }
+        }
+        const value = stored === true || stored === 'true';
+        logFunctionEnd('loadIsDebug');
+        return value;
+    }
+
+    /**
+     * Persists the current isDebug flag to ViolentMonkey storage and refreshes the settings panel.
+     */
+    function persistIsDebug() {
+        logFunctionBegin('persistIsDebug');
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(IS_DEBUG_PREF_KEY, isDebug);
+            } catch (error) {
+                logWarn(`Failed to persist debug mode: ${error}`);
+            }
+        }
+        refreshSettingsPanel();
+        logFunctionEnd('persistIsDebug');
+    }
+
+    /**
+     * Toggles debug mode on/off, persists, and notifies the user.
+     */
+    function toggleIsDebug() {
+        logFunctionBegin('toggleIsDebug');
+        isDebug = !isDebug;
+        log(`Debug mode changed to: ${isDebug}`);
+        persistIsDebug();
+        showNotification(`Debug mode: ${isDebug ? 'on' : 'off'}`);
+        logFunctionEnd('toggleIsDebug');
+    }
+
+    /**
+     * Initializes debug-mode state from storage.
+     */
+    function initializeIsDebug() {
+        logFunctionBegin('initializeIsDebug');
+        isDebug = loadIsDebug();
+        logFunctionEnd('initializeIsDebug');
+    }
+
+    // ============================================================================
+    // USER PREFERENCES (SOURCE CAPTURE)
+    // ============================================================================
+
+    /**
+     * Finds the metadata for a given capture-mode option ID
+     * @param {string} optionId - Identifier stored in preferences
+     * @returns {{id: string, label: string}} Matching option (defaults if not found)
+     */
+    function getCaptureOption(optionId) {
+        return CAPTURE_MODE_OPTIONS.find((option) => option.id === optionId) || CAPTURE_MODE_OPTIONS[0];
+    }
+
+    /**
+     * Loads the persisted capture mode from ViolentMonkey storage (defaults to "none").
+     * @returns {string} Option ID representing the user's preference
+     */
+    function loadCaptureMode() {
+        logFunctionBegin('loadCaptureMode');
+        let storedValue = CAPTURE_MODE_OPTIONS[0].id;
+
+        if (typeof GM_getValue === 'function') {
+            try {
+                storedValue = GM_getValue(CAPTURE_MODE_PREF_KEY, storedValue);
+            } catch (error) {
+                logWarn(`Failed to load capture mode: ${error}`);
+            }
+        }
+
+        if (!CAPTURE_MODE_OPTIONS.some((option) => option.id === storedValue)) {
+            logWarn(`Capture mode "${storedValue}" invalid, reverting to default`);
+            storedValue = CAPTURE_MODE_OPTIONS[0].id;
+        }
+
+        log(`Loaded capture mode: ${storedValue}`);
+        logFunctionEnd('loadCaptureMode');
+        return storedValue;
+    }
+
+    /**
+     * Persists the current capture mode and refreshes its menu command label
+     */
+    function persistCaptureMode() {
+        logFunctionBegin('persistCaptureMode');
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(CAPTURE_MODE_PREF_KEY, captureMode);
+            } catch (error) {
+                logWarn(`Failed to persist capture mode: ${error}`);
+            }
+        }
+        registerCaptureModeMenuCommand();
+        logFunctionEnd('persistCaptureMode');
+    }
+
+    /**
+     * Registers (or re-registers) the ViolentMonkey menu command for cycling capture mode
+     */
+    function registerCaptureModeMenuCommand() {
+        logFunctionBegin('registerCaptureModeMenuCommand');
+        if (typeof GM_registerMenuCommand !== 'function') {
+            log('GM_registerMenuCommand unavailable, skipping capture menu registration');
+            logFunctionEnd('registerCaptureModeMenuCommand');
+            return;
+        }
+
+        if (captureMenuCommandId && typeof GM_unregisterMenuCommand === 'function') {
+            try {
+                GM_unregisterMenuCommand(captureMenuCommandId);
+            } catch (error) {
+                logWarn(`Failed to unregister previous capture menu command: ${error}`);
+            }
+        }
+
+        const optionLabel = getCaptureOption(captureMode).label;
+        const menuLabel = `Capture: ${optionLabel} (click to cycle)`;
+        captureMenuCommandId = GM_registerMenuCommand(menuLabel, cycleCaptureMode);
+        logFunctionEnd('registerCaptureModeMenuCommand');
+    }
+
+    /**
+     * Cycles through capture-mode options and persists the newly selected value
+     */
+    function cycleCaptureMode() {
+        logFunctionBegin('cycleCaptureMode');
+        const currentIndex = CAPTURE_MODE_OPTIONS.findIndex((option) => option.id === captureMode);
+        const nextIndex = (currentIndex + 1) % CAPTURE_MODE_OPTIONS.length;
+        captureMode = CAPTURE_MODE_OPTIONS[nextIndex].id;
+        log(`Capture mode changed to: ${captureMode}`);
+        persistCaptureMode();
+        showNotification(`Capture: ${getCaptureOption(captureMode).label}`);
+        logFunctionEnd('cycleCaptureMode');
+    }
+
+    /**
+     * Initializes capture-mode state and registers its menu command
+     */
+    function initializeCaptureMode() {
+        logFunctionBegin('initializeCaptureMode');
+        captureMode = loadCaptureMode();
+        registerCaptureModeMenuCommand();
+        logFunctionEnd('initializeCaptureMode');
+    }
+
     log('begin script');
+    initializeIsDebug();
     initializeAltZPreference();
+    initializeCaptureMode();
+    triggers = loadTriggers();
+    registerSettingsMenuCommand();
 
     // ============================================================================
     // YOUTUBE TOOLKIT INTEGRATION
@@ -910,6 +1119,7 @@
         const option = {
             label: 'Timestamp',
             displayValue: decoratedTitle,
+            tooltip: 'Link to the video at the current playback position.',
             getResult: () => ({
                 title: decoratedTitle,
                 url: timestampUrl
@@ -999,6 +1209,7 @@
                 options.push({
                     label: 'Video Title',
                     displayValue: videoTitle,
+                    tooltip: 'Title from YouTube video metadata.',
                     getResult: () => ({
                         title: videoTitle,
                         url: capturedUrl
@@ -1021,6 +1232,7 @@
                 options.push({
                     label: 'Playlist Markdown',
                     displayValue: `${context.playlist.videos.length} entries`,
+                    tooltip: 'All playlist entries as a flat markdown bullet list.',
                     getValue: () => playlistMarkdown,
                     isAllLinks: true
                 });
@@ -1031,6 +1243,7 @@
             options.push({
                 label: 'Playlist Link',
                 displayValue: playlistTitle,
+                tooltip: 'Link to the YouTube playlist.',
                 getResult: () => ({
                     title: context.playlist.title ? `YouTube Playlist: ${context.playlist.title}` : 'YouTube Playlist',
                     url: context.playlist.url || capturedUrl
@@ -1043,6 +1256,7 @@
             options.push({
                 label: 'Channel Link',
                 displayValue: context.channel.title,
+                tooltip: 'Link to the YouTube channel page.',
                 getResult: () => ({
                     title: `YouTube Channel: ${context.channel.title}`,
                     url: context.channel.canonicalUrl || capturedUrl
@@ -1743,7 +1957,10 @@
                 return false;
             }
 
-            copyToClipboard(markdown, selectedText, sanitizedUrl);
+            copyToClipboard(markdown, selectedText, sanitizedUrl, {
+                originalUrl: (typeof window !== 'undefined' && window.location && window.location.href) || sanitizedUrl,
+                format: 'selection'
+            });
             showNotification('Selection copied to clipboard');
             clearSelectionCache('selection auto copied');
             logFunctionEnd('handleSelectionAutoCopy');
@@ -2349,6 +2566,19 @@
                 log(`Sanitized buffered URL: "${resolvedUrl}"`);
             }
 
+            // Domain-specific output supersedes the preferred title format. For an Amazon product on
+            // the current page, emit the full details block (a bullet list that fits both single-copy
+            // and multi-item list output). Anchors to OTHER products fall through to the title — their
+            // details are not present in the current DOM.
+            if (shouldEmitAmazonProductBlock(resolvedUrl, !item.anchor)) {
+                const amazonData = getAmazonProductData(resolvedUrl);
+                const amazonBlock = amazonData ? buildAmazonProductMarkdown(amazonData, resolvedUrl) : null;
+                if (amazonBlock) {
+                    log('Buffered item is an Amazon product on the current page; using details block');
+                    return amazonBlock;
+                }
+            }
+
             const titleSourceUrl = item.url || resolvedUrl;
             const title = getAutoInferredTitle(item.anchor, titleSourceUrl);
             if (!title) {
@@ -2375,6 +2605,15 @@
                 log('Did copy to clipboard');
                 showNotification(`Copied link to clipboard`);
                 log(`Did show notification for 1 link`);
+                const captureItem = buffer[0];
+                const captureResolvedUrl = cleanUrl(captureItem.url) || captureItem.url;
+                maybeCaptureSources({
+                    originalUrl: (captureItem.anchor && captureItem.anchor.href) ? captureItem.anchor.href : captureItem.url,
+                    format: shouldEmitAmazonProductBlock(captureResolvedUrl, !captureItem.anchor)
+                        ? 'amazon product'
+                        : getAltZOption(altZTitlePreference).label.toLowerCase(),
+                    output: fullMarkdown
+                });
             } catch (error) {
                 logError(`Failed to copy to clipboard: ${error}`);
                 showNotification(`Failed to copy link - check console for errors`);
@@ -2401,6 +2640,11 @@
                 // Show notification with count
                 showNotification(`Copied ${buffer.length} links to clipboard`);
                 log(`Did show notification for ${buffer.length} links`);
+                maybeCaptureSources({
+                    originalUrl: (typeof window !== 'undefined' && window.location && window.location.href) || '',
+                    format: `${getAltZOption(altZTitlePreference).label.toLowerCase()} (x${buffer.length})`,
+                    output: fullMarkdown
+                });
             } catch (error) {
                 logError(`Failed to copy to clipboard: ${error}`);
                 showNotification(`Failed to copy ${buffer.length} links - check console for errors`);
@@ -2467,7 +2711,7 @@
      * Return type: void (undefined)
      * Reference: https://violentmonkey.github.io/api/gm/#gm_setclipboard
      */
-    function copyToClipboard(markdown, title, url) {
+    function copyToClipboard(markdown, title, url, captureContext) {
         logFunctionBegin('copyToClipboard');
         log(`Will copy to clipboard: "${markdown}"`);
         
@@ -2484,6 +2728,12 @@
             log('Will show notification');
             showNotification('Markdown link copied to clipboard!');
             log('Did show notification');
+            const captureCtx = captureContext || {};
+            maybeCaptureSources({
+                originalUrl: captureCtx.originalUrl || url,
+                format: captureCtx.format || 'link',
+                output: markdown
+            });
         } catch (error) {
             // Type: Error object
             // Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error
@@ -2614,9 +2864,10 @@
         // Using fixed position to stay visible during page scroll
         // High z-index (999999) to appear above most page content
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/style
+        const debugPanelHeight = (isDebugPanelVisible && debugPanelEl) ? debugPanelEl.offsetHeight : 0;
+        const notifTop = 20 + (debugPanelHeight > 0 ? debugPanelHeight + 8 : 0);
         notification.style.cssText = `
             position: fixed;
-            top: 20px;
             right: 20px;
             background: #4CAF50;
             color: white;
@@ -2626,16 +2877,20 @@
             z-index: 999999;
             font-family: sans-serif;
             font-size: 14px;
+            white-space: pre-line;
             animation: mdLinkerFadeIn 0.3s, mdLinkerFadeOut 0.3s 2.7s;
         `;
-        
+        notification.style.top = notifTop + 'px';
+
         log('Will append notification to body');
         // appendChild returns the appended node, but we don't use it
         // Type: void
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Node/appendChild
         document.body.appendChild(notification);
+        // Track as the active notification so appendNotificationLine() can add a 2nd line later.
+        activeNotification = notification;
         log('Did append notification to body');
-        
+
         log('Will schedule notification removal in 3000ms');
         // setTimeout schedules function execution after delay
         // Arrow function captures notification variable from closure
@@ -2647,10 +2902,144 @@
             // Type: void
             // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Element/remove
             notification.remove();
+            if (activeNotification === notification) {
+                activeNotification = null;
+            }
             log('Did remove notification');
         }, 3000);
-        
+
         logFunctionEnd('showNotification');
+    }
+
+    /**
+     * Appends a second line to the currently visible notification (used to confirm a capture save).
+     * Falls back to a fresh notification if the previous one has already faded out.
+     * @param {string} text - Line to append
+     */
+    function appendNotificationLine(text) {
+        try {
+            if (activeNotification && activeNotification.isConnected) {
+                activeNotification.textContent = `${activeNotification.textContent}\n${text}`;
+            } else {
+                showNotification(text);
+            }
+        } catch (error) {
+            /* noop — feedback must never throw */
+        }
+    }
+
+    /**
+     * Builds a filesystem-safe slug for non-product pages: "<host>_<path>".
+     * @param {string} url - Page URL
+     * @returns {string} Slug (no path separators), capped in length
+     */
+    function buildCaptureSlug(url) {
+        try {
+            const parsed = new URL(url);
+            const host = parsed.hostname.replace(/[^A-Za-z0-9.-]/g, '_');
+            const path = parsed.pathname.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'index';
+            return `${host}_${path}`.slice(0, 120);
+        } catch (error) {
+            return 'page';
+        }
+    }
+
+    /**
+     * Compact local timestamp for capture filenames: YYYYMMDDHHMMSS (matches `date +%Y%m%d%H%M%S`).
+     * @returns {string}
+     */
+    function captureTimestamp() {
+        const now = new Date();
+        const pad = (value) => String(value).padStart(2, '0');
+        return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    }
+
+    /**
+     * When capture mode is "html & logs", POSTs the live page source + session logs to the local
+     * capture server (scripts/source_capture) AFTER a clipboard copy. Fails gracefully (just a log
+     * line) when the server is unreachable; appends a 2nd notification line on success.
+     *
+     * The captured HTML is prefixed with an HTML comment recording the raw clicked URL (unstripped),
+     * the format used, and the exact clipboard output. Files are timestamped so captures accumulate
+     * into an archive rather than overwriting.
+     *
+     * Naming: product pages -> sources/products/<asin>_<ts>.html + logs/<asin>_<ts>.log (asin via
+     * the Amazon toolkit); other pages -> sources/other/<host-slug>_<ts>.* .
+     *
+     * @param {{originalUrl?: string, format?: string, output?: string}} [context]
+     *   - originalUrl: the raw URL of whatever was clicked (NOT stripped); defaults to the page URL
+     *   - format: the menu item label / preference / domain format that produced the output
+     *   - output: the exact text placed on the clipboard
+     */
+    function maybeCaptureSources(context) {
+        if (captureMode !== 'html_logs') {
+            return;
+        }
+        logFunctionBegin('maybeCaptureSources');
+        const sourceCapture = (typeof window !== 'undefined' && window.SourceCapture) ? window.SourceCapture : null;
+        if (!sourceCapture || typeof sourceCapture.capture !== 'function') {
+            log('SourceCapture unavailable, skipping capture');
+            logFunctionEnd('maybeCaptureSources');
+            return;
+        }
+
+        const ctx = context || {};
+        const pageUrl = (typeof window !== 'undefined' && window.location && window.location.href) || '';
+        const originalUrl = ctx.originalUrl || pageUrl;
+        const format = ctx.format || '';
+        const output = ctx.output || '';
+
+        // Name by the PAGE's ASIN (the HTML we're saving is the current page), timestamped.
+        let asin = null;
+        const toolkit = getAmazonToolkit();
+        if (toolkit && toolkit.Extractors && typeof toolkit.Extractors.extractProductASIN === 'function') {
+            try {
+                asin = toolkit.Extractors.extractProductASIN(document, pageUrl);
+            } catch (error) {
+                /* noop — ASIN is best-effort */
+            }
+        }
+
+        let pageType;
+        let baseName;
+        if (asin) {
+            pageType = 'products';
+            baseName = asin;
+        } else {
+            pageType = 'other';
+            baseName = buildCaptureSlug(pageUrl);
+        }
+
+        const timestamp = captureTimestamp();
+        const htmlPath = `sources/${pageType}/${baseName}_${timestamp}.html`;
+        const logsPath = `logs/${baseName}_${timestamp}.log`;
+
+        // Prepend a metadata comment: raw clicked URL, the format, then the clipboard output. Guard
+        // against an embedded "-->" prematurely closing the comment.
+        const commentBody = `* original_url: ${originalUrl}\n* format: ${format}\n\n${output}`.replace(/-->/g, '-- >');
+        const html = `<!--\n${commentBody}\n-->\n<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+        const logs = sourceCapture.logBuffer ? sourceCapture.logBuffer.getText() : '';
+
+        log(`Will capture page source + logs -> ${htmlPath}, ${logsPath}`);
+        sourceCapture.capture({
+            userscript: 'markdown_linker',
+            files: [
+                { path: htmlPath, content: html },
+                { path: logsPath, content: logs }
+            ],
+            onResult: (result) => {
+                if (result && result.ok) {
+                    log(`Capture saved: ${htmlPath} + ${logsPath}`);
+                    appendNotificationLine('Saved page source + logs to disk');
+                } else {
+                    const firstError = result && result.results && result.results[0] && result.results[0].error
+                        ? result.results[0].error
+                        : 'unknown';
+                    log(`Capture not saved (server unavailable?): ${firstError}`);
+                }
+            }
+        });
+        logFunctionEnd('maybeCaptureSources');
     }
 
     // Add CSS keyframe animations for notification fade in/out and click feedback
@@ -2770,8 +3159,224 @@
     }
 
     // ============================================================================
+    // AMAZON PRODUCT DETAILS (domain-specific menu section)
+    // ============================================================================
+
+    /**
+     * Returns true when the URL targets an Amazon product page (/dp/{ASIN} or /gp/product/{ASIN}).
+     * Prefers the toolkit's classifier; falls back to a local regex if the toolkit is unavailable.
+     * @param {string} url - URL to test
+     * @returns {boolean}
+     * Reference: common/amazon_toolkit/helpers/validation_helpers.js (isAmazonProductURL)
+     */
+    function isAmazonProductUrl(url) {
+        if (!url) return false;
+        const toolkit = getAmazonToolkit();
+        const fn = toolkit && toolkit.Helpers ? toolkit.Helpers.isAmazonProductURL : null;
+        if (typeof fn === 'function') {
+            try {
+                return !!fn(url);
+            } catch (error) {
+                // fall through to local heuristic
+            }
+        }
+        return /amazon\.[a-z.]+\/(?:[^/]+\/)?(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(url);
+    }
+
+    /**
+     * True when `url`'s product ASIN matches the CURRENT page's product ASIN. The details block is
+     * built from the live `document`, so it is only valid for the product we are actually viewing —
+     * not for an anchor that links to a different product (which would mix that ASIN with the
+     * current page's price/variants).
+     * @param {string} url - Target URL to compare against the current page
+     * @returns {boolean}
+     */
+    function amazonAsinMatchesCurrentPage(url) {
+        const toolkit = getAmazonToolkit();
+        const extractors = toolkit && toolkit.Extractors;
+        if (!extractors || typeof extractors.extractProductASIN !== 'function') {
+            return false;
+        }
+        const pageUrl = (typeof window !== 'undefined' && window.location && window.location.href) || '';
+        let targetAsin = null;
+        let pageAsin = null;
+        try { targetAsin = extractors.extractProductASIN(document, url); } catch (error) { /* noop */ }
+        try { pageAsin = extractors.extractProductASIN(document, pageUrl); } catch (error) { /* noop */ }
+        return !!targetAsin && targetAsin === pageAsin;
+    }
+
+    /**
+     * Whether to emit the Amazon details block for `url`. Allowed for a page-level action (no
+     * anchor) on an Amazon product — `document` is that product — or for an anchor whose ASIN
+     * matches the current page (e.g. the product's own title/image link).
+     * @param {string} url - Target (cleaned) URL
+     * @param {boolean} isPageAction - True when triggered on the page itself (not an anchor elsewhere)
+     * @returns {boolean}
+     */
+    function shouldEmitAmazonProductBlock(url, isPageAction) {
+        if (!url || !isAmazonProductUrl(url)) {
+            return false;
+        }
+        if (isPageAction) {
+            return true;
+        }
+        return amazonAsinMatchesCurrentPage(url);
+    }
+
+    // Cache the last extraction so re-opening the menu on the same URL does not re-walk the DOM.
+    let amazonProductCacheKey = null;
+    let amazonProductCacheValue = null;
+
+    /**
+     * Extracts full Amazon product data from the live document via the toolkit orchestrator.
+     * Result is cached per URL.
+     * @param {string} url - Captured (cleaned) product URL
+     * @returns {object|null} Toolkit product-data object, or null when unavailable
+     * Reference: common/amazon_toolkit/extractors/product_extractor.js (extractProductData)
+     */
+    function getAmazonProductData(url) {
+        logFunctionBegin('getAmazonProductData');
+        if (!url) {
+            logFunctionEnd('getAmazonProductData');
+            return null;
+        }
+        if (amazonProductCacheKey === url && amazonProductCacheValue) {
+            log('Using cached Amazon product data');
+            logFunctionEnd('getAmazonProductData');
+            return amazonProductCacheValue;
+        }
+        const toolkit = getAmazonToolkit();
+        const extractFn = toolkit && toolkit.Extractors ? toolkit.Extractors.extractProductData : null;
+        if (typeof extractFn !== 'function') {
+            log('Amazon toolkit extractProductData unavailable, skipping product details');
+            logFunctionEnd('getAmazonProductData');
+            return null;
+        }
+        let data = null;
+        try {
+            data = extractFn(document, url);
+        } catch (error) {
+            logError(`Amazon product extraction failed: ${error}`);
+        }
+        if (data) {
+            amazonProductCacheKey = url;
+            amazonProductCacheValue = data;
+            log('Extracted Amazon product data');
+        } else {
+            log('Amazon product extraction returned no data');
+        }
+        logFunctionEnd('getAmazonProductData');
+        return data;
+    }
+
+    /**
+     * Builds the markdown details block for an Amazon product. Shape:
+     *   * [title](url)
+     *     * price: $9.99
+     *     * delivers: 0d
+     *     * rating: 4.4 / 653
+     *     * color: Beige-4 Rolls   (one line per variant dimension, named)
+     *     * size: 15 yards
+     *     * store: [Visit the OK TAPE Store](url)
+     * Each detail line is omitted when its underlying field is unavailable.
+     * @param {object} productData - Toolkit product-data object
+     * @param {string} cleanedUrl - Cleaned product URL to use for the link
+     * @returns {string|null} Markdown block, or null when productData is missing
+     */
+    function buildAmazonProductMarkdown(productData, cleanedUrl) {
+        logFunctionBegin('buildAmazonProductMarkdown');
+        if (!productData) {
+            logFunctionEnd('buildAmazonProductMarkdown');
+            return null;
+        }
+        const title = productData.titleCleaned || productData.title || 'Amazon Product';
+        const url = cleanedUrl ||
+            (productData.url && (productData.url.originalClean || productData.url.original)) ||
+            '';
+        const lines = [`* [${title}](${url})`];
+
+        if (productData.price && productData.price.current) {
+            lines.push(`  * price: ${productData.price.current}`);
+        }
+        if (productData.delivery && Number.isFinite(productData.delivery.inDays)) {
+            lines.push(`  * delivers: ${productData.delivery.inDays}d`);
+        }
+        if (productData.rating && productData.rating.value != null) {
+            const count = productData.rating.count != null ? ` / ${productData.rating.count}` : '';
+            lines.push(`  * rating: ${productData.rating.value}${count}`);
+        }
+        if (Array.isArray(productData.variants)) {
+            // Present known dimensions in a stable, spec-matching order (color, then size); any
+            // other dimensions follow in their original DOM order. Supports any number of dimensions.
+            const dimensionPriority = { color: 0, size: 1 };
+            const orderedVariants = productData.variants
+                .map((entry, index) => ({ entry, index }))
+                .sort((a, b) => {
+                    const pa = dimensionPriority[a.entry.dimension];
+                    const pb = dimensionPriority[b.entry.dimension];
+                    const ra = pa === undefined ? 100 + a.index : pa;
+                    const rb = pb === undefined ? 100 + b.index : pb;
+                    return ra - rb;
+                })
+                .map((wrapped) => wrapped.entry);
+            orderedVariants.forEach((entry) => {
+                if (entry && entry.dimension && entry.value) {
+                    lines.push(`  * ${entry.dimension}: ${entry.value}`);
+                }
+            });
+        }
+        if (productData.store && productData.store.url) {
+            // The byline is either a brand storefront ("store") or a brand search ("search",
+            // e.g. "Brand: ALLOLO"). Label the line by kind so search links aren't mislabeled.
+            const isSearch = productData.store.kind === 'search';
+            const label = isSearch ? 'search' : 'store';
+            const storeName = productData.store.name || (isSearch ? 'Brand' : 'Store');
+            lines.push(`  * ${label}: [${storeName}](${productData.store.url})`);
+        }
+
+        const markdown = lines.join('\n');
+        log(`Built Amazon product markdown (${lines.length} lines)`);
+        logFunctionEnd('buildAmazonProductMarkdown');
+        return markdown;
+    }
+
+    // ============================================================================
     // POPUP MENU UI
     // ============================================================================
+
+    /**
+     * Returns the Settings section options for the popup menu.
+     * These items use `action` instead of `getValue` (no clipboard write).
+     * @returns {Array<object>} Menu option descriptors for the SETTINGS section
+     */
+    function buildSettingsMenuOptions() {
+        return [
+            {
+                label: 'Open settings…',
+                displayValue: 'Triggers and preferences',
+                tooltip: 'Opens the Markdown Linker settings panel where you can configure key bindings and preferences.',
+                action: () => { openTriggerSettings(); removeMenu(); }
+            },
+            {
+                label: 'Quick-copy title',
+                displayValue: getAltZOption(altZTitlePreference).label,
+                tooltip: 'Title format used for quiet copy and buffer copy. Click to cycle.',
+                action: () => { cycleAltZTitlePreference(); }
+            },
+            {
+                label: 'Capture',
+                displayValue: getCaptureOption(captureMode).label,
+                tooltip: 'Toggle source+log capture to the local capture server.',
+                action: () => { cycleCaptureMode(); }
+            },
+            {
+                label: 'Debug mode',
+                displayValue: isDebug ? 'on' : 'off',
+                tooltip: 'Enable console logging and reveal the Developer section in the popup.',
+                action: () => { toggleIsDebug(); }
+            }
+        ];
+    }
 
     /**
      * Creates and displays context menu with title options
@@ -2780,28 +3385,36 @@
      * @param {number} y - Y coordinate for menu placement (clientY from event)
      * @param {boolean} isAnchor - True if target is an anchor link, false for page
      * @param {HTMLAnchorElement|null} anchor - The anchor element (if isAnchor is true)
-     * 
+     * @param {boolean} isContextMenu - True when opened via right-click; prepends a Quick copy item
+     *
      * JavaScript boolean: Primitive type with two values: true or false
      * MouseEvent coordinates: clientX/clientY are relative to viewport
      * getBoundingClientRect() used for position adjustment
-     * Parameter types:sour
+     * Parameter types:
      * - x: number (pixel coordinate from MouseEvent.clientX)
      * - y: number (pixel coordinate from MouseEvent.clientY)
      * - isAnchor: boolean (JavaScript primitive boolean type)
      * - anchor: HTMLAnchorElement | null (DOM element or null)
+     * - isContextMenu: boolean (true when opened via right-click context menu)
      * Return type: void (undefined)
      * Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/clientX
      * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect
      */
-    function createMenu(x, y, isAnchor, anchor = null) {
+    function createMenu(x, y, isAnchor, anchor = null, isContextMenu = false) {
         logFunctionBegin('createMenu');
         log(`Will create menu at position (${x}, ${y}), isAnchor: ${isAnchor}`);
         
         // Capture the current targetUrl value at menu creation time
         // This prevents issues if the global targetUrl is cleared before menu item is clicked
-        const capturedUrl = targetUrl;
-        log(`Captured URL for menu: "${capturedUrl}"`);
+        //
+        // Clean it HERE so this is the single chokepoint for both anchor and page paths: the
+        // page-click branches (handleClick / handleContextMenu / handleKeydown) set targetUrl to
+        // the raw window.location.href without cleaning, which left long Amazon product URLs
+        // (slug path + crid/sprefix/sr/sp_csd tracking) in the menu output. cleanUrl is
+        // idempotent, so re-cleaning an already-cleaned anchor URL is a no-op.
+        const capturedUrl = cleanUrl(targetUrl) || targetUrl;
+        log(`Captured URL for menu (cleaned): "${capturedUrl}"`);
 
         let youtubeContext = null;
         if (capturedUrl) {
@@ -2843,36 +3456,75 @@
             position: fixed;
             left: ${x}px;
             top: ${y}px;
-            background: rgba(18, 19, 22, 0.78);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 14px;
-            box-shadow: 0 22px 45px rgba(0, 0, 0, 0.65);
-            padding: 6px 0;
+            background: rgba(40, 38, 44, 0.74);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+            padding: 4px 0;
             z-index: 999999;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 11px;
+            font-size: 13px;
             min-width: 220px;
             max-width: 520px;
             width: max-content;
             color: #f8f9fa;
-            backdrop-filter: blur(26px) saturate(120%);
+            backdrop-filter: blur(8px);
         `;
         log('Did create menu element');
 
         log('Will build menu options array');
-        
-        // Array of option descriptors with optional URL overrides or block copy handlers
-        // Type: Array<{label: string, getValue?: () => string|null, getResult?: () => ({title: string, url?: string}), isAllLinks?: boolean}>
-        // Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array
-        const options = [];
-        const domainSectionOptions = [];
-        
+
+        // --- Build domain-specific options (YouTube, Amazon) ---
+        const domainSectionItems = [];
+
+        if (youtubeContext) {
+            log('YouTube context available, will append specialized menu options');
+            const youtubeOptions = buildYouTubeMenuOptions(youtubeContext, capturedUrl);
+            youtubeOptions.forEach((optionDescriptor) => {
+                log(`Queueing YouTube option: ${optionDescriptor.label}`);
+                domainSectionItems.push(optionDescriptor);
+            });
+        }
+
+        if (shouldEmitAmazonProductBlock(capturedUrl, !isAnchor)) {
+            log('Amazon product detected for current page, will build product details option');
+            let amazonProductData = null;
+            try {
+                amazonProductData = getAmazonProductData(capturedUrl);
+            } catch (error) {
+                logError(`Amazon product evaluation failed (non-fatal): ${error}`);
+            }
+            const amazonBlock = amazonProductData
+                ? buildAmazonProductMarkdown(amazonProductData, capturedUrl)
+                : null;
+            if (amazonBlock) {
+                const amazonTitle = amazonProductData.titleCleaned ||
+                    amazonProductData.title ||
+                    'Product details';
+                // Displayed label is just the product title; the clipboard value is the full
+                // markdown details block. isAllLinks copies getValue() verbatim (no link re-wrap).
+                domainSectionItems.push({
+                    label: 'Amazon Product',
+                    displayValue: amazonTitle,
+                    tooltip: 'Full product details block (title, ASIN, price) as a markdown snippet.',
+                    getValue: () => amazonBlock,
+                    isAllLinks: true
+                });
+                log('Queued Amazon Product details option');
+            } else {
+                log('No Amazon product details available for this URL');
+            }
+        }
+
+        // --- Build common options ---
+        const commonItems = [];
+
         if (isAnchor) {
             log('Is anchor, will get link text');
             const linkText = getLinkText(anchor);
             if (linkText) {
                 log(`Did get link text, adding to options: "${linkText}"`);
-                options.push({
+                commonItems.push({
                     label: 'Link Text',
                     displayValue: linkText,
                     getValue: () => linkText
@@ -2882,14 +3534,14 @@
             }
         }
 
-        // Common options for both anchor and page
         log('Will get page title');
         const pageTitle = getPageTitle();
         if (pageTitle) {
             log(`Did get page title, adding to options: "${pageTitle}"`);
-            options.push({
+            commonItems.push({
                 label: 'Page Title',
                 displayValue: pageTitle,
+                tooltip: 'Current document.title; may include notification counts or site suffixes.',
                 getValue: () => pageTitle
             });
         } else {
@@ -2901,9 +3553,10 @@
             const urlComponentTitle = getUrlComponentTitle(capturedUrl);
             if (urlComponentTitle) {
                 log(`Did build URL component title, adding to options: "${urlComponentTitle}"`);
-                options.push({
+                commonItems.push({
                     label: 'URL (forward)',
                     displayValue: urlComponentTitle,
+                    tooltip: 'Domain → path segments left-to-right.',
                     getValue: () => urlComponentTitle
                 });
             } else {
@@ -2913,28 +3566,14 @@
             const urlComponentTitleLRU = getUrlComponentTitle(capturedUrl, { direction: 'reverse' });
             if (urlComponentTitleLRU) {
                 log(`Did build reverse URL component title, adding to options: "${urlComponentTitleLRU}"`);
-                options.push({
+                commonItems.push({
                     label: 'URL (reverse)',
                     displayValue: urlComponentTitleLRU,
+                    tooltip: 'Domain ← path segments right-to-left (most-specific first).',
                     getValue: () => urlComponentTitleLRU
                 });
             } else {
                 log('Reverse URL component title unavailable');
-            }
-        }
-
-        if (youtubeContext) {
-            log('YouTube context available, will append specialized menu options');
-            const youtubeOptions = buildYouTubeMenuOptions(youtubeContext, capturedUrl);
-            if (youtubeOptions.length > 0) {
-                domainSectionOptions.push({
-                    isSectionHeader: true,
-                    label: 'YouTube'
-                });
-                youtubeOptions.forEach((optionDescriptor) => {
-                    log(`Queueing YouTube option: ${optionDescriptor.label}`);
-                    domainSectionOptions.push(optionDescriptor);
-                });
             }
         }
 
@@ -2943,7 +3582,7 @@
             const metaDesc = getMetaDescription();
             if (metaDesc) {
                 log(`Did get meta description, adding to options: "${metaDesc}"`);
-                options.push({
+                commonItems.push({
                     label: 'Meta Description',
                     displayValue: metaDesc,
                     getValue: () => metaDesc
@@ -2953,59 +3592,117 @@
             }
         }
 
-        if (domainSectionOptions.length > 0) {
-            log(`Adding ${domainSectionOptions.length} domain-specific entries (including headers)`);
-            domainSectionOptions.forEach((optionDescriptor) => options.push(optionDescriptor));
+        // --- Assemble sections in display order ---
+        // Type: Array<{label: string, getValue?: () => string|null, getResult?: () => ({title: string, url?: string}), isAllLinks?: boolean, isSectionHeader?: boolean, action?: () => void, tooltip?: string}>
+        // Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array
+        const options = [];
+
+        // a. Optional Quick copy item (context-menu / right-click popup only)
+        if (isContextMenu) {
+            options.push({
+                label: 'Quick copy',
+                displayValue: `${getAltZOption(altZTitlePreference).label} — no menu`,
+                action: () => {
+                    compileAndCopyBufferedLinks([{ url: capturedUrl, anchor: isAnchor ? anchor : null }]);
+                    removeMenu();
+                }
+            });
         }
-        
-        // Add separator and "All Links" options at the bottom
+
+        // b. Domain-specific section (YouTube / Amazon) — placed first
+        if (domainSectionItems.length > 0) {
+            log(`Adding ${domainSectionItems.length} domain-specific items`);
+            options.push({ isSectionHeader: true, label: 'Domain Specific' });
+            domainSectionItems.forEach((item) => options.push(item));
+        }
+
+        // c. Common section
+        options.push({ isSectionHeader: true, label: 'Common' });
+        commonItems.forEach((item) => options.push(item));
+
+        // d. Lists section
         log('Adding extract all links options');
-        options.push({ 
-            label: 'All Links (flat)', 
+        options.push({ isSectionHeader: true, label: 'Lists' });
+        options.push({
+            label: 'All Links (flat)',
             displayValue: 'Single-level list',
+            tooltip: 'All anchors on the page as a flat bullet list.',
             getValue: extractAllLinksFlat,
-            isAllLinks: true,
-            isSeparator: true  // Add visual separator above this item
+            isAllLinks: true
         });
-        options.push({ 
-            label: 'All Links (tree)', 
+        options.push({
+            label: 'All Links (tree)',
             displayValue: 'Preserves heading depth',
+            tooltip: 'All anchors grouped under the nearest heading (preserves document structure).',
             getValue: extractAllLinksHierarchical,
-            isAllLinks: true 
+            isAllLinks: true
         });
-        
+
+        // e. Settings section
+        options.push({ isSectionHeader: true, label: 'Settings' });
+        buildSettingsMenuOptions().forEach((item) => options.push(item));
+
+        // f. Developer section — only visible when debug mode is on
+        if (isDebug) {
+            options.push({ isSectionHeader: true, label: 'Developer' });
+            options.push({
+                label: 'Copy page state',
+                displayValue: 'JSON to clipboard',
+                tooltip: 'Copies current URL, title, capture mode, and debug state as JSON.',
+                action: () => {
+                    const state = {
+                        url: capturedUrl,
+                        title: getPageTitle(),
+                        captureMode,
+                        isDebug,
+                        altZTitlePreference,
+                        isAnchor,
+                        anchorHref: isAnchor && anchor ? anchor.href : null
+                    };
+                    try {
+                        GM_setClipboard(JSON.stringify(state, null, 2), 'text/plain');
+                        showNotification('Page state copied to clipboard');
+                    } catch (error) {
+                        logError(`Copy page state failed: ${error}`);
+                    }
+                    removeMenu();
+                }
+            });
+        }
+
         log(`Did build ${options.length} menu options`);
 
         // Create menu items
         log('Will create menu items');
+        let isFirstSectionHeader = true;
         options.forEach((option, index) => {
             const debugLabel = option.displayValue ? `${option.label}: ${option.displayValue}` : option.label;
             log(`Creating menu item ${index}: "${debugLabel}"`);
 
             if (option.isSectionHeader) {
                 const headerWrapper = document.createElement('div');
-                headerWrapper.style.cssText = `
-                    margin-top: 12px;
-                    padding: 0 12px;
-                `;
+                // First section header gets minimal top margin; subsequent ones add visible breathing room
+                headerWrapper.style.cssText = `margin-top: ${isFirstSectionHeader ? '2px' : '8px'};`;
+                isFirstSectionHeader = false;
 
+                // Explicit 1px block — more reliable than border-top on zero-height div
                 const headerLine = document.createElement('div');
                 headerLine.style.cssText = `
-                    border-top: 1px solid rgba(255, 255, 255, 0.55);
-                    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+                    height: 1px;
+                    background: rgba(255, 255, 255, 0.40);
+                    margin: 0 6px 4px 6px;
                 `;
 
                 const headerLabel = document.createElement('div');
                 headerLabel.textContent = option.label;
                 headerLabel.style.cssText = `
-                    margin-top: 6px;
-                    padding: 4px 2px 2px;
+                    margin-top: 3px;
+                    padding: 2px 0 2px 8px;
                     text-transform: uppercase;
                     letter-spacing: 0.18em;
                     font-size: 10px;
                     font-weight: 600;
-                    color: rgba(255, 255, 255, 0.85);
-                    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+                    color: rgba(255, 255, 255, 0.45);
                 `;
 
                 headerWrapper.appendChild(headerLine);
@@ -3015,47 +3712,84 @@
             }
 
             const item = document.createElement('div');
+            // Left indent (20px) visually subordinates cells under their section header (8px)
             item.style.cssText = `
-                padding: 8px 14px;
+                padding: 4px 14px 4px 20px;
                 cursor: pointer;
                 white-space: normal;
-                line-height: 1.4;
+                line-height: 1.3;
                 word-break: break-word;
                 color: inherit;
                 background-color: transparent;
                 transition: background-color 120ms ease;
-                ${option.isSeparator ? 'border-top: 2px solid rgba(255,255,255,0.65); box-shadow: 0 -1px 0 rgba(0,0,0,0.65); margin-top: 12px; padding-top: 18px;' : ''}
             `;
 
             const labelElement = document.createElement('div');
+            let valueElement = null;
             if (option.displayValue) {
                 labelElement.textContent = option.label;
                 labelElement.style.cssText = `
                     font-size: 10px;
                     text-transform: uppercase;
                     letter-spacing: 0.08em;
-                    color: rgba(248, 249, 250, 0.65);
-                    margin-bottom: 2px;
+                    color: rgba(248, 249, 250, 0.5);
+                    margin-bottom: 1px;
                 `;
-                const valueElement = document.createElement('div');
+                valueElement = document.createElement('div');
                 valueElement.textContent = option.displayValue;
                 valueElement.style.cssText = `
-                    font-size: 12px;
+                    font-size: 13px;
                     color: #f8f9fa;
                 `;
-                item.appendChild(labelElement);
-                item.appendChild(valueElement);
             } else {
                 labelElement.textContent = option.label;
                 labelElement.style.cssText = `
-                    font-size: 12px;
+                    font-size: 13px;
                     color: #f8f9fa;
                 `;
+            }
+
+            if (option.tooltip) {
+                // Wrap content in flex row and append ⓘ icon to the right
+                item.style.display = 'flex';
+                item.style.alignItems = 'flex-start';
+                const contentWrap = document.createElement('div');
+                contentWrap.style.cssText = 'flex:1;min-width:0;';
+                contentWrap.appendChild(labelElement);
+                if (valueElement) { contentWrap.appendChild(valueElement); }
+
+                const icon = document.createElement('span');
+                icon.textContent = 'ⓘ';
+                icon.style.cssText = 'flex-shrink:0;margin-left:6px;margin-top:1px;opacity:0.45;cursor:help;user-select:none;font-size:11px;';
+
+                let tooltipBubble = null;
+                icon.addEventListener('mouseenter', () => {
+                    tooltipBubble = document.createElement('div');
+                    tooltipBubble.textContent = option.tooltip;
+                    tooltipBubble.style.cssText = [
+                        'position:fixed', 'z-index:1000001', 'max-width:240px',
+                        'background:#111', 'color:#f8f9fa', 'border:1px solid rgba(255,255,255,0.2)',
+                        'border-radius:6px', 'padding:6px 10px', 'font-size:11px',
+                        'line-height:1.4', 'pointer-events:none', 'white-space:normal'
+                    ].join(';');
+                    document.body.appendChild(tooltipBubble);
+                    const r = icon.getBoundingClientRect();
+                    tooltipBubble.style.left = `${Math.min(r.left, window.innerWidth - 248)}px`;
+                    tooltipBubble.style.top = `${Math.max(4, r.top - tooltipBubble.offsetHeight - 6)}px`;
+                });
+                icon.addEventListener('mouseleave', () => {
+                    if (tooltipBubble) { tooltipBubble.remove(); tooltipBubble = null; }
+                });
+
+                item.appendChild(contentWrap);
+                item.appendChild(icon);
+            } else {
                 item.appendChild(labelElement);
+                if (valueElement) { item.appendChild(valueElement); }
             }
 
             item.addEventListener('mouseenter', () => {
-                item.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                item.style.backgroundColor = 'color-mix(in srgb, Highlight 18%, transparent)';
             });
 
             item.addEventListener('mouseleave', () => {
@@ -3064,6 +3798,13 @@
 
             item.addEventListener('click', () => {
                 log(`Menu item clicked: "${option.label}"`);
+
+                // Action items (settings section) — invoke directly, no clipboard write
+                if (option.action) {
+                    log(`Settings action invoked: "${option.label}"`);
+                    option.action();
+                    return;
+                }
 
                 // Check if this is an "All Links" option
                 if (option.isAllLinks) {
@@ -3077,6 +3818,13 @@
                             GM_setClipboard(allLinksMarkdown, 'text/plain');
                             log('Did copy all links to clipboard');
                             showNotification('All page links copied to clipboard!');
+                            maybeCaptureSources({
+                                originalUrl: (isAnchor && anchor)
+                                    ? (anchor.href || capturedUrl)
+                                    : ((typeof window !== 'undefined' && window.location && window.location.href) || capturedUrl),
+                                format: (option.label || '').toLowerCase(),
+                                output: allLinksMarkdown
+                            });
                         } catch (error) {
                             logError(`Failed to copy all links: ${error}`);
                             alert('Failed to copy to clipboard. Check console for details.');
@@ -3106,7 +3854,12 @@
                         if (markdown) {
                             log(`Did create markdown: "${markdown}"`);
                             log('Will copy to clipboard');
-                            copyToClipboard(markdown, title, resolvedUrl);
+                            copyToClipboard(markdown, title, resolvedUrl, {
+                                originalUrl: (isAnchor && anchor)
+                                    ? (anchor.href || resolvedUrl)
+                                    : ((typeof window !== 'undefined' && window.location && window.location.href) || resolvedUrl),
+                                format: (option.label || '').toLowerCase()
+                            });
                             log('Did copy to clipboard');
                         } else {
                             logError('Markdown creation failed (returned null)');
@@ -3233,22 +3986,684 @@
     // EVENT HANDLERS
     // ============================================================================
 
+    /** Deep-clones a single term (modifiers, keys, click flags). */
+    function cloneTerm(term) {
+        const t = {
+            modifiers: Object.assign({}, term.modifiers),
+            keys: (term.keys || []).slice(),
+            requiresClick: !!term.requiresClick,
+        };
+        if (term.clickCount != null) { t.clickCount = term.clickCount; }
+        if (term.rightClick) { t.rightClick = true; }
+        return t;
+    }
+
+    /** Deep-clones a binding, which may be a single-term shortcut or a chord (binding.terms[]). */
+    function cloneBinding(binding) {
+        if (binding.terms) {
+            return { modifiers: {}, keys: [], requiresClick: false, terms: binding.terms.map(cloneTerm) };
+        }
+        return cloneTerm(binding);
+    }
+
     /**
-     * Determines if event should trigger the markdown menu
-     * Currently checks for Alt/Option key modifier
-     * @param {Event} event - The DOM event (click, contextmenu, keydown)
-     * @returns {boolean} True if Alt key is pressed
-     * Reference: https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/altKey
+     * Deep-clones a triggers config (so defaults are never mutated).
      */
-    function shouldTrigger(event) {
-        logFunctionBegin('shouldTrigger');
-        log(`Checking if Alt key is pressed: ${event.altKey}`);
-        
-        const result = event.altKey;
-        log(`Should trigger: ${result}`);
-        
-        logFunctionEnd('shouldTrigger');
-        return result;
+    function cloneTriggers(source) {
+        const out = {};
+        Object.keys(source || {}).forEach((action) => {
+            out[action] = (source[action] || []).map(cloneBinding);
+        });
+        return out;
+    }
+
+    /**
+     * Snapshots the modifier state from a DOM event.
+     */
+    function bindingState(event) {
+        return {
+            meta: !!event.metaKey,
+            ctrl: !!event.ctrlKey,
+            alt: !!event.altKey,
+            shift: !!event.shiftKey
+        };
+    }
+
+    /**
+     * Glyph table for named keys that have Unicode symbols.
+     * Keys are stored lowercase in bindings; match with event.key.toLowerCase().
+     */
+    const KEY_GLYPHS = {
+        ' ':          '␣',
+        'escape':     '⎋',
+        'tab':        '⇥',
+        'enter':      '↩',
+        'backspace':  '⌫',
+        'delete':     '⌦',
+        'pageup':     '⇞',
+        'pagedown':   '⇟',
+        'home':       '↖',
+        'end':        '↘',
+        'arrowup':    '↑',
+        'arrowdown':  '↓',
+        'arrowleft':  '←',
+        'arrowright': '→',
+    };
+
+    /**
+     * Normalises event.key to the lowercase storage key used in bindings.keys[].
+     * Returns null for keys that cannot be recorded (modifiers, Escape, Unidentified, etc.).
+     *   'a'          → 'a'         (single printable)
+     *   ' '          → ' '         (space, stored as ' ', displayed as ␣)
+     *   'Enter'      → 'enter'     (in KEY_GLYPHS)
+     *   'ArrowLeft'  → 'arrowleft' (in KEY_GLYPHS)
+     *   'F1'         → 'f1'        (F-key)
+     *   'Shift'      → null        (modifier — not recordable as a key)
+     *   'Escape'     → null        (reserved for recording-cancel)
+     *   'Unidentified' → null
+     */
+    function normalizeKeyForStorage(eventKey) {
+        if (!eventKey || eventKey === 'Unidentified') { return null; }
+        // Modifiers are never stored as keys.
+        if (eventKey === 'Shift' || eventKey === 'Control' ||
+            eventKey === 'Alt'   || eventKey === 'Meta') { return null; }
+        // Escape is reserved as the recording-cancel shortcut.
+        if (eventKey === 'Escape') { return null; }
+        const lower = eventKey.toLowerCase();
+        // Single printable char (including space).
+        if (eventKey.length === 1) { return lower; }
+        // Named keys with glyphs.
+        if (Object.prototype.hasOwnProperty.call(KEY_GLYPHS, lower)) { return lower; }
+        // F-keys (F1..F19).
+        if (/^f([1-9]|1[0-9])$/.test(lower)) { return lower; }
+        return null;
+    }
+
+    /**
+     * True if a binding requires at least one key, modifier, or click (never matches "no input").
+     * Chord bindings (binding.terms[]) are considered valid when they have at least one term.
+     * A bare click (requiresClick:true, no keys, no modifiers) is a valid trigger on its own.
+     */
+    function bindingHasInput(binding) {
+        if (binding.terms) { return binding.terms.length > 0; }
+        if (binding.requiresClick) { return true; }
+        const m = binding.modifiers || {};
+        return (binding.keys && binding.keys.length > 0) || !!(m.meta || m.ctrl || m.alt || m.shift);
+    }
+
+    /**
+     * Whether the given modifier state + currently-pressed keys satisfy a binding (exact modifier
+     * match; all of the binding's regular keys must be held).
+     */
+    function matchesBinding(binding, state) {
+        if (!binding || !bindingHasInput(binding)) {
+            return false;
+        }
+        const m = binding.modifiers || {};
+        if (!!m.meta !== state.meta || !!m.ctrl !== state.ctrl || !!m.alt !== state.alt || !!m.shift !== state.shift) {
+            return false;
+        }
+        const keys = binding.keys || [];
+        for (let index = 0; index < keys.length; index += 1) {
+            if (!pressedKeys.has(keys[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Does any click-type binding for `actionName` match the current state?
+     * @param {string}  actionName
+     * @param {object}  state       - modifier state from bindingState(event)
+     * @param {number}  [clickCount=1]  - MouseEvent.detail (1=single, 2=double, …)
+     * @param {boolean} [isRightClick=false]
+     * Chord bindings whose last term is a click term are matched when chordProgress
+     * shows all prior terms have been completed.
+     */
+    function actionMatchesClick(actionName, state, clickCount, isRightClick) {
+        const list = triggers[actionName] || [];
+        const n = clickCount || 1;
+        const right = !!isRightClick;
+        return list.some((binding) => {
+            if (!binding) { return false; }
+            if (binding.terms) {
+                // Chord ending in a click: prior terms must already be completed.
+                const progress = chordProgress[actionName];
+                const lastIdx = binding.terms.length - 1;
+                if (!progress || progress.nextTermIdx !== lastIdx) { return false; }
+                const lastTerm = binding.terms[lastIdx];
+                if (!lastTerm || !lastTerm.requiresClick) { return false; }
+                if (!matchesBinding(lastTerm, state)) { return false; }
+                if ((lastTerm.clickCount || 1) !== n) { return false; }
+                return !!lastTerm.rightClick === right;
+            }
+            if (!binding.requiresClick) { return false; }
+            if (!matchesBinding(binding, state)) { return false; }
+            if ((binding.clickCount || 1) !== n) { return false; }
+            return !!binding.rightClick === right;
+        });
+    }
+
+    /**
+     * Did the just-pressed key complete a keyboard-type binding for `actionName`? (used on keydown).
+     * Only fires for single-term (non-chord) bindings. Chord bindings are handled by chordActionResult.
+     * Requiring `justPressedKey` to be part of the binding avoids re-firing on unrelated keydowns.
+     */
+    function keyboardActionTriggered(actionName, state, justPressedKey) {
+        const list = triggers[actionName] || [];
+        return list.some((binding) =>
+            binding && !binding.requiresClick && !binding.terms &&
+            (binding.keys || []).indexOf(justPressedKey) !== -1 &&
+            matchesBinding(binding, state));
+    }
+
+    // ---- Chord-matching state machine ----
+    // Tracks per-action progress through multi-term chords.
+    // { [actionName]: { bindingIndex: number, nextTermIdx: number, timer: number } }
+    const chordProgress = {};
+
+    function clearChordProgress(actionName) {
+        const p = chordProgress[actionName];
+        if (p && p.timer) { clearTimeout(p.timer); }
+        delete chordProgress[actionName];
+        debugTimerStop('playback');
+    }
+
+    /**
+     * Advances chord matching for `actionName` on a keydown event.
+     * Returns:
+     *   'complete' — all terms matched; the action should fire now.
+     *   'advance'  — an intermediate term matched; waiting for the next term.
+     *   null       — no chord matched or advanced.
+     * A 1500 ms inactivity timer resets progress between terms.
+     */
+    function chordActionResult(actionName, state, justPressedKey) {
+        const list = triggers[actionName] || [];
+        const progress = chordProgress[actionName];
+        for (let bi = 0; bi < list.length; bi++) {
+            const binding = list[bi];
+            if (!binding || !binding.terms || binding.terms.length === 0) { continue; }
+            const expectedIdx = (progress && progress.bindingIndex === bi) ? progress.nextTermIdx : 0;
+            const term = binding.terms[expectedIdx];
+            if (!term || term.requiresClick) { continue; }
+            if ((term.keys || []).indexOf(justPressedKey) === -1) { continue; }
+            if (!matchesBinding(term, state)) { continue; }
+            // Term matched — advance or complete.
+            clearChordProgress(actionName);
+            if (expectedIdx + 1 >= binding.terms.length) {
+                return 'complete';
+            }
+            const timer = setTimeout(() => { delete chordProgress[actionName]; }, CHORD_PLAYBACK_TIMEOUT_MS);
+            chordProgress[actionName] = { bindingIndex: bi, nextTermIdx: expectedIdx + 1, timer };
+            debugTimerStart('playback', CHORD_PLAYBACK_TIMEOUT_MS);
+            return 'advance';
+        }
+        if (progress) { clearChordProgress(actionName); }
+        return null;
+    }
+
+    /**
+     * Loads trigger bindings from storage, falling back to defaults. (Settings UI writes them.)
+     */
+    function loadTriggers() {
+        if (typeof GM_getValue === 'function') {
+            try {
+                const stored = GM_getValue(TRIGGERS_PREF_KEY, null);
+                if (stored) {
+                    const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
+                    if (parsed && typeof parsed === 'object') {
+                        return cloneTriggers(parsed);
+                    }
+                }
+            } catch (error) {
+                logWarn(`Failed to load triggers, using defaults: ${error}`);
+            }
+        }
+        return cloneTriggers(DEFAULT_TRIGGERS);
+    }
+
+    /** Persists the current triggers to ViolentMonkey storage. */
+    function saveTriggers() {
+        if (typeof GM_setValue === 'function') {
+            try {
+                GM_setValue(TRIGGERS_PREF_KEY, JSON.stringify(triggers));
+            } catch (error) {
+                logWarn(`Failed to save triggers: ${error}`);
+            }
+        }
+    }
+
+    // ---- Trigger settings panel + "record combo" UI ----
+    const ACTION_LABELS = {
+        menu:             'Open menu',
+        inferQuiet:       'Quiet copy (no menu)',
+        inferBuffer:      'Buffer links (hold + click)',
+        openSettings:     'Open settings',
+        toggleDebugPanel: 'Toggle debug panel'
+    };
+    let settingsPanelEl = null;
+    let settingsBodyEl = null;
+
+    // Recording state --------------------------------------------------------
+    let recordingAction   = null;
+    let recordOverlayEl   = null;
+    let recordTerms       = [];   // completed terms collected this session
+    let recordCurrentModifiers = null;
+    let recordCurrentKeys      = null;
+    let recordCurrentClickCount = 0;
+    let recordCurrentRightClick = false;
+    let recordChordTimer  = null; // between-term pause → commit on expiry
+    let recordClickTimer  = null; // multi-click accumulation window
+
+    /**
+     * Human-readable label for one term (one step of a chord).
+     * Examples: "⌘+K"  "⌥+Z+click"  "double-click"  "[⌘+K ⌘+S]"
+     */
+    function formatTerm(term) {
+        const parts = [];
+        const m = term.modifiers || {};
+        if (m.meta)  { parts.push('⌘'); }
+        if (m.ctrl)  { parts.push('⌃'); }
+        if (m.alt)   { parts.push('⌥'); }
+        if (m.shift) { parts.push('⇧'); }
+        (term.keys || []).forEach((key) => {
+            const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, key) ? KEY_GLYPHS[key] : null;
+            if (glyph !== null) {
+                parts.push(glyph);
+            } else if (key.length === 1) {
+                parts.push(key.toUpperCase());
+            } else {
+                // F-keys and other multi-char keys: capitalise first letter (e.g. 'f1' → 'F1').
+                parts.push(key.charAt(0).toUpperCase() + key.slice(1));
+            }
+        });
+        let label = parts.join('+');
+        if (term.requiresClick) {
+            const n = term.clickCount || 1;
+            const clickLabel = term.rightClick
+                ? (n >= 2 ? 'double-right-click' : 'right-click')
+                : (n === 2 ? 'double-click' : n >= 3 ? `${n}×click` : 'click');
+            label = label ? `${label}+${clickLabel}` : clickLabel;
+        }
+        return label || '(none)';
+    }
+
+    /**
+     * Human-readable label for one binding (single-term shortcut or multi-term chord).
+     *   Single term:   "⌘+K"
+     *   Two+ terms:    "[⌘+K ⌘+S]"  (square brackets for ≥ 2 terms)
+     */
+    function formatBinding(binding) {
+        if (binding.terms && binding.terms.length > 0) {
+            const termLabels = binding.terms.map(formatTerm);
+            return termLabels.length >= 2 ? `[${termLabels.join(' ')}]` : (termLabels[0] || '(none)');
+        }
+        return formatTerm(binding);
+    }
+
+    /** Combined label for all of an action's bindings, joined with "  or  ". */
+    function formatActionBindings(actionName) {
+        const list = triggers[actionName] || [];
+        return list.length ? list.map(formatBinding).join('  or  ') : '(none)';
+    }
+
+    function styleSettingsButton(button) {
+        button.style.cssText = 'margin-left:8px;padding:3px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#f8f9fa;font-size:12px;cursor:pointer;';
+    }
+
+    function resetCurrentTerm() {
+        recordCurrentModifiers = { meta: false, ctrl: false, alt: false, shift: false };
+        recordCurrentKeys      = new Set();
+        recordCurrentClickCount = 0;
+        recordCurrentRightClick = false;
+    }
+
+    function clearRecordTimers() {
+        if (recordChordTimer) { clearTimeout(recordChordTimer); recordChordTimer = null; }
+        if (recordClickTimer) { clearTimeout(recordClickTimer); recordClickTimer = null; }
+        debugTimerStop('record');
+    }
+
+    function updateRecordOverlay() {
+        if (!recordOverlayEl) { return; }
+        const preview = recordOverlayEl.querySelector('#markdown-linker-record-preview');
+        if (!preview) { return; }
+        const completedLabels = recordTerms.map(formatBinding);
+        const hasCurrent = recordCurrentKeys && recordCurrentKeys.size > 0;
+        const currentLabel = hasCurrent
+            ? formatTerm({ modifiers: recordCurrentModifiers || {}, keys: Array.from(recordCurrentKeys) }) + ' …'
+            : '';
+        const allParts = completedLabels.concat(currentLabel ? [currentLabel] : (completedLabels.length === 0 ? ['…'] : []));
+        if (allParts.length >= 2) {
+            preview.textContent = `[${allParts.join(' ')}]`;
+        } else {
+            preview.textContent = allParts[0] || '…';
+        }
+    }
+
+    function hideRecordOverlay() {
+        if (recordOverlayEl) {
+            recordOverlayEl.remove();
+            recordOverlayEl = null;
+        }
+    }
+
+    function showRecordOverlay(actionName) {
+        hideRecordOverlay();
+        const overlay = document.createElement('div');
+        overlay.id = 'markdown-linker-record-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1000001;display:flex;align-items:center;justify-content:center;color:#fff;font-family:sans-serif;text-align:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'max-width:80vw;padding:0 20px;';
+        const heading = document.createElement('div');
+        heading.textContent = `Recording: ${ACTION_LABELS[actionName] || actionName}`;
+        heading.style.cssText = 'font-size:18px;font-weight:600;margin-bottom:8px;';
+        const instr = document.createElement('div');
+        instr.textContent = 'Press keys and release to end each term; pause 500 ms to commit the chord. Click or right-click ends immediately. Esc cancels.';
+        instr.style.cssText = 'font-size:13px;opacity:0.8;margin-bottom:12px;';
+        const preview = document.createElement('div');
+        preview.id = 'markdown-linker-record-preview';
+        preview.textContent = '…';
+        preview.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:0.04em;';
+        box.appendChild(heading);
+        box.appendChild(instr);
+        box.appendChild(preview);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        recordOverlayEl = overlay;
+    }
+
+    function accumulateRecordModifiers(event) {
+        if (!recordCurrentModifiers) { return; }
+        const state = bindingState(event);
+        recordCurrentModifiers.meta  = recordCurrentModifiers.meta  || state.meta;
+        recordCurrentModifiers.ctrl  = recordCurrentModifiers.ctrl  || state.ctrl;
+        recordCurrentModifiers.alt   = recordCurrentModifiers.alt   || state.alt;
+        recordCurrentModifiers.shift = recordCurrentModifiers.shift || state.shift;
+    }
+
+    function captureTerm(requiresClick, clickCount, rightClick) {
+        return {
+            modifiers: {
+                meta:  !!(recordCurrentModifiers && recordCurrentModifiers.meta),
+                ctrl:  !!(recordCurrentModifiers && recordCurrentModifiers.ctrl),
+                alt:   !!(recordCurrentModifiers && recordCurrentModifiers.alt),
+                shift: !!(recordCurrentModifiers && recordCurrentModifiers.shift),
+            },
+            keys: Array.from(recordCurrentKeys || []),
+            requiresClick: !!requiresClick,
+            ...(requiresClick && clickCount && clickCount > 1 ? { clickCount } : {}),
+            ...(requiresClick && rightClick ? { rightClick: true } : {}),
+        };
+    }
+
+    function commitChord() {
+        const action = recordingAction;
+        if (!action) { return; }
+        if (recordTerms.length === 0) { stopRecording(); return; }
+        let binding;
+        if (recordTerms.length === 1) {
+            // Single-term shortcut — keep the flat structure (backward-compatible).
+            binding = recordTerms[0];
+        } else {
+            // Multi-term chord — wrap in a `terms` array.
+            binding = { modifiers: {}, keys: [], requiresClick: false, terms: recordTerms.slice() };
+        }
+        if (!bindingHasInput(binding)) { stopRecording(); return; }
+        triggers[action] = [binding];
+        saveTriggers();
+        log(`Recorded ${action} trigger: ${formatBinding(binding)}`);
+        stopRecording();
+    }
+
+    function recordKeydownHandler(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === 'Escape') { stopRecording(); return; }
+        clearRecordTimers(); // new keydown cancels the between-term pause timer
+        accumulateRecordModifiers(event);
+        const storageKey = normalizeKeyForStorage(event.key);
+        if (storageKey) {
+            recordCurrentKeys.add(storageKey);
+        }
+        updateRecordOverlay();
+    }
+
+    function recordKeyupHandler(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        // Commit a term when the first non-modifier key is released.
+        if (recordCurrentKeys && recordCurrentKeys.size > 0) {
+            recordTerms.push(captureTerm(false));
+            resetCurrentTerm();
+            // Start between-term pause timer: commit the chord if nothing else is
+            // pressed within 500 ms. The user presses a new key to continue the chord.
+            recordChordTimer = setTimeout(() => {
+                recordChordTimer = null;
+                commitChord();
+            }, CHORD_RECORD_TIMEOUT_MS);
+            debugTimerStart('record', CHORD_RECORD_TIMEOUT_MS);
+            updateRecordOverlay();
+            updateDebugPanelState();
+        }
+        // Releasing a modifier with no keys yet does nothing (user may still add keys).
+    }
+
+    function recordClickHandler(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        clearRecordTimers();
+        accumulateRecordModifiers(event);
+        recordCurrentClickCount++;
+        // Accumulate consecutive clicks within 300 ms as a multi-click term.
+        recordClickTimer = setTimeout(() => {
+            recordClickTimer = null;
+            recordTerms.push(captureTerm(true, recordCurrentClickCount, false));
+            resetCurrentTerm();
+            commitChord();
+        }, 300);
+        updateRecordOverlay();
+    }
+
+    function recordContextMenuHandler(event) {
+        // Suppress browser context menu during recording; treat as a right-click term.
+        event.preventDefault();
+        event.stopPropagation();
+        clearRecordTimers();
+        accumulateRecordModifiers(event);
+        recordCurrentClickCount++;
+        recordCurrentRightClick = true;
+        recordClickTimer = setTimeout(() => {
+            recordClickTimer = null;
+            recordTerms.push(captureTerm(true, recordCurrentClickCount, true));
+            resetCurrentTerm();
+            commitChord();
+        }, 300);
+        updateRecordOverlay();
+    }
+
+    function startRecording(actionName) {
+        recordingAction = actionName;
+        recordTerms     = [];
+        resetCurrentTerm();
+        // Capture on window (fires before the document-level trigger handlers) so
+        // keys/clicks the user presses while recording do NOT also fire normal triggers.
+        window.addEventListener('keydown',      recordKeydownHandler,      true);
+        window.addEventListener('keyup',        recordKeyupHandler,        true);
+        window.addEventListener('click',        recordClickHandler,        true);
+        window.addEventListener('contextmenu',  recordContextMenuHandler,  true);
+        showRecordOverlay(actionName);
+        updateDebugPanelState();
+    }
+
+    function stopRecording() {
+        clearRecordTimers();
+        window.removeEventListener('keydown',     recordKeydownHandler,     true);
+        window.removeEventListener('keyup',       recordKeyupHandler,       true);
+        window.removeEventListener('click',       recordClickHandler,       true);
+        window.removeEventListener('contextmenu', recordContextMenuHandler, true);
+        recordingAction = null;
+        recordTerms     = [];
+        resetCurrentTerm();
+        hideRecordOverlay();
+        refreshSettingsPanel();
+        updateDebugPanelState();
+    }
+
+    function renderSettingsBody(body) {
+        body.textContent = '';
+        Object.keys(ACTION_LABELS).forEach((action) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);';
+            const left = document.createElement('div');
+            const name = document.createElement('div');
+            name.textContent = ACTION_LABELS[action];
+            name.style.cssText = 'font-size:13px;color:#f8f9fa;';
+            const bindingLabel = document.createElement('div');
+            bindingLabel.textContent = formatActionBindings(action);
+            bindingLabel.style.cssText = 'font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;';
+            left.appendChild(name);
+            left.appendChild(bindingLabel);
+            const right = document.createElement('div');
+            const recordButton = document.createElement('button');
+            recordButton.textContent = 'Record';
+            styleSettingsButton(recordButton);
+            recordButton.addEventListener('click', (event) => { event.stopPropagation(); startRecording(action); });
+            const resetButton = document.createElement('button');
+            resetButton.textContent = 'Reset';
+            styleSettingsButton(resetButton);
+            resetButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                triggers[action] = cloneTriggers(DEFAULT_TRIGGERS)[action];
+                saveTriggers();
+                refreshSettingsPanel();
+            });
+            right.appendChild(recordButton);
+            right.appendChild(resetButton);
+            row.appendChild(left);
+            row.appendChild(right);
+            body.appendChild(row);
+        });
+
+        // ---- Preferences section ----
+        const prefSectionLabel = document.createElement('div');
+        prefSectionLabel.textContent = 'Preferences';
+        prefSectionLabel.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(248,249,250,0.45);margin-top:14px;margin-bottom:4px;';
+        body.appendChild(prefSectionLabel);
+
+        // Quick-copy title row
+        const titleRow = document.createElement('div');
+        titleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);';
+        const titleLeft = document.createElement('div');
+        const titleName = document.createElement('div');
+        titleName.textContent = 'Quick-copy title';
+        titleName.style.cssText = 'font-size:13px;color:#f8f9fa;';
+        const titleValueLabel = document.createElement('div');
+        titleValueLabel.textContent = getAltZOption(altZTitlePreference).label;
+        titleValueLabel.style.cssText = 'font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;';
+        titleLeft.appendChild(titleName);
+        titleLeft.appendChild(titleValueLabel);
+        const titleRight = document.createElement('div');
+        const cycleButton = document.createElement('button');
+        cycleButton.textContent = 'Cycle';
+        styleSettingsButton(cycleButton);
+        cycleButton.addEventListener('click', (event) => { event.stopPropagation(); cycleAltZTitlePreference(); });
+        const titleResetButton = document.createElement('button');
+        titleResetButton.textContent = 'Reset';
+        styleSettingsButton(titleResetButton);
+        titleResetButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            altZTitlePreference = ALT_Z_TITLE_OPTIONS[0].id;
+            persistAltZTitlePreference();
+        });
+        titleRight.appendChild(cycleButton);
+        titleRight.appendChild(titleResetButton);
+        titleRow.appendChild(titleLeft);
+        titleRow.appendChild(titleRight);
+        body.appendChild(titleRow);
+
+        // Debug mode row
+        const debugRow = document.createElement('div');
+        debugRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.12);';
+        const debugLeft = document.createElement('div');
+        const debugName = document.createElement('div');
+        debugName.textContent = 'Debug mode';
+        debugName.style.cssText = 'font-size:13px;color:#f8f9fa;';
+        const debugValueLabel = document.createElement('div');
+        debugValueLabel.textContent = isDebug ? 'on' : 'off';
+        debugValueLabel.style.cssText = 'font-size:12px;color:rgba(248,249,250,0.7);margin-top:2px;';
+        debugLeft.appendChild(debugName);
+        debugLeft.appendChild(debugValueLabel);
+        const debugRight = document.createElement('div');
+        const debugToggleButton = document.createElement('button');
+        debugToggleButton.textContent = 'Toggle';
+        styleSettingsButton(debugToggleButton);
+        debugToggleButton.addEventListener('click', (event) => { event.stopPropagation(); toggleIsDebug(); });
+        debugRight.appendChild(debugToggleButton);
+        debugRow.appendChild(debugLeft);
+        debugRow.appendChild(debugRight);
+        body.appendChild(debugRow);
+    }
+
+    function refreshSettingsPanel() {
+        if (settingsBodyEl) {
+            renderSettingsBody(settingsBodyEl);
+        }
+    }
+
+    function closeTriggerSettings() {
+        if (settingsPanelEl) {
+            settingsPanelEl.remove();
+            settingsPanelEl = null;
+            settingsBodyEl = null;
+        }
+    }
+
+    function openTriggerSettings() {
+        closeTriggerSettings();
+        const panel = document.createElement('div');
+        panel.id = 'markdown-linker-settings';
+        panel.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:#1f1f1f;color:#f8f9fa;border:1px solid rgba(255,255,255,0.25);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.6);z-index:1000000;font-family:sans-serif;padding:16px;';
+        const title = document.createElement('div');
+        title.textContent = 'Markdown Linker — Settings';
+        title.style.cssText = 'font-size:15px;font-weight:600;margin-bottom:4px;';
+        const hint = document.createElement('div');
+        hint.textContent = 'Click Record, then press your keys and/or click. Esc cancels.';
+        hint.style.cssText = 'font-size:11px;color:rgba(248,249,250,0.6);margin-bottom:10px;';
+        const body = document.createElement('div');
+        const footer = document.createElement('div');
+        footer.style.cssText = 'display:flex;justify-content:flex-end;margin-top:12px;';
+        const resetAll = document.createElement('button');
+        resetAll.textContent = 'Reset all';
+        styleSettingsButton(resetAll);
+        resetAll.addEventListener('click', (event) => {
+            event.stopPropagation();
+            triggers = cloneTriggers(DEFAULT_TRIGGERS);
+            saveTriggers();
+            refreshSettingsPanel();
+        });
+        const closeButton = document.createElement('button');
+        closeButton.textContent = 'Close';
+        styleSettingsButton(closeButton);
+        closeButton.addEventListener('click', (event) => { event.stopPropagation(); closeTriggerSettings(); });
+        footer.appendChild(resetAll);
+        footer.appendChild(closeButton);
+        panel.appendChild(title);
+        panel.appendChild(hint);
+        panel.appendChild(body);
+        panel.appendChild(footer);
+        document.body.appendChild(panel);
+        settingsPanelEl = panel;
+        settingsBodyEl = body;
+        renderSettingsBody(body);
+    }
+
+    /** Registers the ViolentMonkey menu command that opens the trigger settings panel. */
+    function registerSettingsMenuCommand() {
+        if (typeof GM_registerMenuCommand === 'function') {
+            GM_registerMenuCommand('Markdown Linker: settings…', openTriggerSettings);
+        }
     }
 
     /**
@@ -3261,13 +4676,16 @@
         logFunctionBegin('handleClick');
         log('Click event received');
         
-        // Debug: Log Alt+Z status
-        const isAltPressed = event.altKey;
-        const isZPressed = isZKeyDown;
-        log(`Click: altKey=${isAltPressed}, z down=${isZPressed}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
+        // Evaluate configurable click triggers (menu vs. buffer/auto-infer).
+        // Pass event.detail (click count: 1=single, 2=double) for multi-click binding support.
+        const clickState = bindingState(event);
+        const menuClick   = actionMatchesClick('menu',        clickState, event.detail || 1, false);
+        const bufferClick = actionMatchesClick('inferBuffer', clickState, event.detail || 1, false);
+        log(`Click: menuTrigger=${menuClick}, bufferTrigger=${bufferClick}, buffer active=${inferBufferActive}, buffer size=${inferBufferLinks.length}`);
 
-        if (!shouldTrigger(event)) {
-            log('Should not trigger (Alt key not pressed), returning');
+        if (!menuClick && !bufferClick) {
+            log('No click trigger matched, returning');
+            markDebugEventStatus(debugLastClickEventEl, false);
             logFunctionEnd('handleClick');
             return;
         }
@@ -3277,19 +4695,17 @@
         log('Will prevent default and stop propagation');
         event.preventDefault();
         event.stopPropagation();
+        markDebugEventStatus(debugLastClickEventEl, true);
         log('Did prevent default and stop propagation');
 
-        // Check if Alt+Z are both pressed (auto-infer mode)
-        // Use event.altKey directly for Alt
-        // Use isZKeyDown for Z (simple boolean flag)
-        log('Will check if Alt+Z keys are pressed (auto-infer mode)');
-        const isAutoInferMode = event.altKey && isZKeyDown;
-        log(`Is auto-infer mode (Alt+Z+Click): ${isAutoInferMode}`);
+        // Buffer (auto-infer) mode when the buffer trigger matched; otherwise open the menu.
+        const isAutoInferMode = bufferClick;
+        log(`Is auto-infer (buffer) mode: ${isAutoInferMode}`);
         
-        // If we just entered auto-infer mode, mark that the buffer is now active
-        if (isAutoInferMode && !isAltZBufferActive) {
-            isAltZBufferActive = true;
-            log('Activated Alt+Z buffer mode');
+        // If we just entered auto-infer mode, snapshot hold state on first trigger.
+        if (isAutoInferMode && !inferBufferActive) {
+            activateInferBuffer(event);
+            setDebugLastAction('inferBuffer activated');
         }
         // Returns null if no match found
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/Element/closest
@@ -3314,8 +4730,8 @@
                     showClickFeedback(event.clientX, event.clientY);
                     log('Did show click feedback animation');
                     
-                    altZClickBuffer.push({ url: targetUrl, anchor: anchor });
-                    log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+                    inferBufferLinks.push({ url: targetUrl, anchor: anchor });
+                    log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
                 } else {
                     log('In normal mode, will create menu for anchor');
                     if (maybeAutoCopySelection(false, targetUrl)) {
@@ -3337,8 +4753,8 @@
                     showClickFeedback(event.clientX, event.clientY);
                     log('Did show click feedback animation');
                     
-                    altZClickBuffer.push({ url: targetUrl, anchor: null });
-                    log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+                    inferBufferLinks.push({ url: targetUrl, anchor: null });
+                    log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
                 } else {
                     log('In normal mode, will create menu for page (fallback)');
                     if (maybeAutoCopySelection(false, targetUrl)) {
@@ -3363,8 +4779,8 @@
                 showClickFeedback(event.clientX, event.clientY);
                 log('Did show click feedback animation');
                 
-                altZClickBuffer.push({ url: targetUrl, anchor: null });
-                log(`Buffered link #${altZClickBuffer.length}: "${targetUrl}"`);
+                inferBufferLinks.push({ url: targetUrl, anchor: null });
+                log(`Buffered link #${inferBufferLinks.length}: "${targetUrl}"`);
             } else {
                 log('In normal mode, will create menu for page');
                 if (maybeAutoCopySelection(false, targetUrl)) {
@@ -3388,9 +4804,11 @@
     function handleContextMenu(event) {
         logFunctionBegin('handleContextMenu');
         log('Context menu (right-click) event received');
-        
-        if (!shouldTrigger(event)) {
-            log('Should not trigger (Alt key not pressed), returning');
+
+        const contextState = bindingState(event);
+        if (!actionMatchesClick('menu', contextState, event.detail || 1, true)) {
+            log('No menu trigger matched on right-click, returning');
+            markDebugEventStatus(debugLastClickEventEl, false);
             logFunctionEnd('handleContextMenu');
             return;
         }
@@ -3399,16 +4817,17 @@
         log('Will prevent default and stop propagation');
         event.preventDefault();
         event.stopPropagation();
+        markDebugEventStatus(debugLastClickEventEl, true);
         log('Did prevent default and stop propagation');
 
         log('Will find closest anchor element');
         const anchor = event.target.closest('a');
-        
+
         if (anchor) {
             log('Found anchor element, will attempt URL extraction');
             targetUrl = extractUrlFromAnchor(anchor, event);
             targetElement = anchor;
-            
+
             // Validate URL immediately after extraction
             if (validateUrl(targetUrl, anchor, event, 'handleContextMenu after extractUrlFromAnchor')) {
                 log(`Successfully extracted and validated URL: "${targetUrl}"`);
@@ -3421,7 +4840,7 @@
                     logFunctionEnd('handleContextMenu');
                     return;
                 }
-                createMenu(event.clientX, event.clientY, true, anchor);
+                createMenu(event.clientX, event.clientY, true, anchor, true /* isContextMenu */);
             } else {
                 logError('URL validation failed, using current page URL as fallback');
                 targetUrl = window.location.href;
@@ -3433,7 +4852,7 @@
                     logFunctionEnd('handleContextMenu');
                     return;
                 }
-                createMenu(event.clientX, event.clientY, false);
+                createMenu(event.clientX, event.clientY, false, null, true /* isContextMenu */);
             }
         } else {
             log('Right-clicked on page (not an anchor)');
@@ -3446,9 +4865,9 @@
                 logFunctionEnd('handleContextMenu');
                 return;
             }
-            createMenu(event.clientX, event.clientY, false);
+            createMenu(event.clientX, event.clientY, false, null, true /* isContextMenu */);
         }
-        
+
         logFunctionEnd('handleContextMenu');
     }
 
@@ -3481,8 +4900,12 @@
         // Check if target has contenteditable attribute
         // contenteditable="true" allows editing of non-form elements
         // Reference: https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/contenteditable
-        const isContentEditable = target && target.contentEditable === 'true' || target ? target.closest('[contenteditable="true"]') : null;
-        log(`Is contenteditable: ${!!isContentEditable}`);
+        // Guard `.closest` — the keydown target may be a non-element (e.g. document) with no closest().
+        const isContentEditable = !!(target && (
+            target.contentEditable === 'true' ||
+            (typeof target.closest === 'function' && target.closest('[contenteditable="true"]'))
+        ));
+        log(`Is contenteditable: ${isContentEditable}`);
         
         const result = isInputField || isTextArea || !!isContentEditable;
         log(`Should skip keyboard trigger: ${result}`);
@@ -3500,26 +4923,95 @@
     function handleKeydown(event) {
         // Check if M key pressed (case-insensitive)
         // Alt+M or M alone (without Ctrl/Shift/Meta)
-        const isM = event.key === 'm' || event.key === 'M';
-        const isAltM = isM && event.altKey;
-        const isMalone = isM && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey;
+        if (event.repeat) { return; } // ignore auto-repeat; fire once per press
+        const justPressedKey = normalizeKeyForStorage(event.key);
+        const keyState = bindingState(event);
+        // Chord matching is evaluated once per keydown. chordActionResult() is stateful
+        // (it mutates chordProgress), so it must be called exactly once per action here.
+        const menuChordResult        = justPressedKey ? chordActionResult('menu',             keyState, justPressedKey) : null;
+        const inferChordResult       = justPressedKey ? chordActionResult('inferQuiet',       keyState, justPressedKey) : null;
+        const settingsChordResult    = justPressedKey ? chordActionResult('openSettings',     keyState, justPressedKey) : null;
+        const debugPanelChordResult  = justPressedKey ? chordActionResult('toggleDebugPanel', keyState, justPressedKey) : null;
 
-        if (isAltM || isMalone) {
+        const isMenuKey        = !!justPressedKey && (keyboardActionTriggered('menu',             keyState, justPressedKey) || menuChordResult === 'complete');
+        const isInferKey       = !!justPressedKey && (keyboardActionTriggered('inferQuiet',       keyState, justPressedKey) || inferChordResult === 'complete');
+        const isSettingsKey    = !!justPressedKey && (keyboardActionTriggered('openSettings',     keyState, justPressedKey) || settingsChordResult === 'complete');
+        const isDebugPanelKey  = !!justPressedKey && (keyboardActionTriggered('toggleDebugPanel', keyState, justPressedKey) || debugPanelChordResult === 'complete');
+        // Consume intermediate chord terms so they don't fall through to other handlers.
+        const isChordAdvancing = menuChordResult === 'advance' || inferChordResult === 'advance' || settingsChordResult === 'advance' || debugPanelChordResult === 'advance';
+
+        // Settings toggle: open panel if closed, close if already open.
+        // Check document containment rather than just settingsPanelEl identity — the element
+        // can be removed from the DOM externally (e.g. by a test harness or another script),
+        // leaving a stale reference that would prevent reopening.
+        if (isSettingsKey) {
+            if (isInEditableContext(event)) { return; }
+            event.preventDefault();
+            event.stopPropagation();
+            pressedKeys.clear();
+            markDebugEventStatus(debugLastKeyEventEl, true);
+            setDebugLastAction('settings toggled');
+            const panelIsOpen = settingsPanelEl && document.body.contains(settingsPanelEl);
+            if (panelIsOpen) {
+                closeTriggerSettings();
+            } else {
+                openTriggerSettings();
+            }
+            return;
+        }
+
+        if (isDebugPanelKey) {
+            if (!isDebug) { markDebugEventStatus(debugLastKeyEventEl, false); return; }
+            if (isInEditableContext(event)) { markDebugEventStatus(debugLastKeyEventEl, false); return; }
+            event.preventDefault();
+            event.stopPropagation();
+            pressedKeys.clear();
+            markDebugEventStatus(debugLastKeyEventEl, true);
+            setDebugLastAction('debug panel toggled');
+            toggleDebugPanel();
+            return;
+        }
+
+        // An intermediate chord term matched (not complete yet). Consume the event so it
+        // doesn't inadvertently trigger other shortcuts or page behaviour while the user
+        // is mid-chord.
+        if (isChordAdvancing) {
+            event.preventDefault();
+            event.stopPropagation();
+            markDebugEventStatus(debugLastKeyEventEl, true);
+            return;
+        }
+
+        if (isMenuKey || isInferKey) {
             logFunctionBegin('handleKeydown');
-            log('Trigger key combination detected');
-            
-            // Check if we're in an input context - skip M alone trigger if so
-            // Alt+M should still work in input fields, but M alone should not
-            if (isMalone && isInEditableContext(event)) {
-                log('M alone in editable context (input/textarea/contenteditable), skipping trigger');
+            log(`Keyboard trigger detected (key=${justPressedKey}, menu=${isMenuKey}, inferQuiet=${isInferKey})`);
+
+            // Don't fire keyboard triggers while typing in a field.
+            if (isInEditableContext(event)) {
+                log('In editable context (input/textarea/contenteditable), skipping keyboard trigger');
+                markDebugEventStatus(debugLastKeyEventEl, false);
                 logFunctionEnd('handleKeydown');
                 return;
             }
-            
+
             log('Will prevent default and stop propagation');
             event.preventDefault();
             event.stopPropagation();
+            markDebugEventStatus(debugLastKeyEventEl, true);
             log('Did prevent default and stop propagation');
+
+            // Quiet auto-infer (no menu): copy the hovered link via the capture-aware compiler.
+            if (isInferKey) {
+                const inferHovered = document.elementFromPoint(mouseX, mouseY);
+                const inferAnchor = inferHovered ? inferHovered.closest('a') : null;
+                const inferRawUrl = inferAnchor ? extractUrlFromAnchor(inferAnchor, event) : window.location.href;
+                log('Keyboard auto-infer: copying single link without menu');
+                setDebugLastAction('inferQuiet fired (key: ' + justPressedKey + ')');
+                compileAndCopyBufferedLinks([{ url: inferRawUrl, anchor: inferAnchor }]);
+                logFunctionEnd('handleKeydown');
+                return;
+            }
+            setDebugLastAction('menu fired (key: ' + justPressedKey + ')');
 
             // elementFromPoint() returns topmost element at given coordinates
             // Uses tracked mouse position since keyboard events don't have clientX/Y
@@ -3576,6 +5068,8 @@
                 createMenu(mouseX, mouseY, false);
             }
             logFunctionEnd('handleKeydown');
+        } else {
+            markDebugEventStatus(debugLastKeyEventEl, false);
         }
     }
 
@@ -3598,6 +5092,13 @@
         // Reference: https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/clientX
         mouseX = event.clientX;
         mouseY = event.clientY;
+        // Throttle cursor row updates to ~10fps.
+        if (isDebugPanelVisible && !debugCursorThrottle) {
+            debugCursorThrottle = setTimeout(() => {
+                debugCursorThrottle = null;
+                updateDebugCursor();
+            }, 100);
+        }
     });
     log('Did add mousemove listener');
 
@@ -3606,78 +5107,598 @@
     // Type: Set<string> (stores key names like 'Alt', 'z', 'Z')
     // Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set
     const pressedKeys = new Set();
-    
-    // Buffer to collect multiple links while Alt+Z are held
-    // Each entry: {url: string, anchor: HTMLElement|null}
-    // Type: Array<{url: string, anchor: HTMLElement|null}>
-    let altZClickBuffer = [];
-    
-    // Flag to track if Alt+Z buffer mode is currently active
-    // Prevents reinitializing buffer on key repeat events
-    // Type: boolean
-    let isAltZBufferActive = false;
-    
-    // Keyboard shortcuts: Alt+M or M alone - register FIRST so key tracker captures SECOND (fires second during capture)
-    log('Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)');
-    // Simple state tracking: just remember if z is currently down
-    let isZKeyDown = false;
-    
+
+    // ---- inferBuffer state ----------------------------------------------------
+    // Links collected while the buffer trigger is held.
+    let inferBufferLinks = [];
+    // True while the buffer trigger has fired and its hold keys are still pressed.
+    let inferBufferActive = false;
+    // Modifier hold state captured at the moment the buffer was activated.
+    // Any one of these going up will finalize the buffer (option A).
+    let inferBufferHoldMeta  = false;
+    let inferBufferHoldCtrl  = false;
+    let inferBufferHoldAlt   = false;
+    let inferBufferHoldShift = false;
+    // Non-modifier hold keys (e.g. 'z') captured at activation.
+    let inferBufferHoldKeys  = new Set();
+
+    /**
+     * Records the hold state at the moment the buffer trigger fires.
+     * For a click-triggered buffer every key currently in pressedKeys is a hold key
+     * (the click itself is the trigger, not a key).
+     * @param {MouseEvent} clickEvent - The click event that activated the buffer.
+     */
+    function activateInferBuffer(clickEvent) {
+        inferBufferActive    = true;
+        inferBufferLinks     = [];
+        inferBufferHoldMeta  = !!(clickEvent && clickEvent.metaKey);
+        inferBufferHoldCtrl  = !!(clickEvent && clickEvent.ctrlKey);
+        inferBufferHoldAlt   = !!(clickEvent && clickEvent.altKey);
+        inferBufferHoldShift = !!(clickEvent && clickEvent.shiftKey);
+        inferBufferHoldKeys  = new Set(pressedKeys); // snapshot all held keys
+        log(`Infer buffer activated. Hold: meta=${inferBufferHoldMeta}, ctrl=${inferBufferHoldCtrl}, alt=${inferBufferHoldAlt}, shift=${inferBufferHoldShift}, keys=[${[...inferBufferHoldKeys].join(',')}]`);
+        updateDebugPanelState();
+    }
+
+    /**
+     * Flushes the link buffer and compiles the result. Resets all buffer state.
+     */
+    function finalizeInferBuffer() {
+        if (!inferBufferActive) { return; }
+        inferBufferActive    = false;
+        const links          = inferBufferLinks;
+        inferBufferLinks     = [];
+        inferBufferHoldKeys  = new Set();
+        inferBufferHoldMeta  = false;
+        inferBufferHoldCtrl  = false;
+        inferBufferHoldAlt   = false;
+        inferBufferHoldShift = false;
+        updateDebugPanelState();
+        if (links.length > 0) {
+            log(`Finalizing infer buffer with ${links.length} links`);
+            setDebugLastAction('inferBuffer finalized (' + links.length + ' links)');
+            compileAndCopyBufferedLinks(links);
+        } else {
+            log('Infer buffer finalized (empty, nothing to copy)');
+        }
+    }
+    // ---------------------------------------------------------------------------
+
+    // ---- Debug panel state variables ------------------------------------------
+    let isDebugPanelVisible = false;
+    let debugPanelEl = null;
+    let debugLastKeyEventEl = null;   // DOM element for last logged key event (to mark consumed)
+    let debugLastClickEventEl = null; // DOM element for last logged click/contextmenu event
+    let debugCursorThrottle = null;   // throttle timer for cursor row
+    let debugEventCounter = 0;        // unique ID counter for event status elements
+
+    // ============================================================================
+    // DEBUG PANEL
+    // ============================================================================
+
+    /**
+     * Starts the SVG timer-ring animation for the given timer row.
+     * @param {'record'|'playback'} timerId
+     * @param {number} durationMs
+     */
+    function debugTimerStart(timerId, durationMs) {
+        if (!isDebugPanelVisible || !debugPanelEl) { return; }
+        const ring = debugPanelEl.querySelector('#ml-debug-ring-' + timerId);
+        const fill = debugPanelEl.querySelector('#ml-debug-fill-' + timerId);
+        if (!ring || !fill) { return; }
+        fill.style.fill = 'rgba(239,68,68,0.55)';
+        // Restart animation by removing, forcing reflow, re-adding.
+        ring.style.animation = 'none';
+        void ring.getBoundingClientRect(); // force reflow
+        ring.style.animationDuration = durationMs + 'ms';
+        ring.style.animation = `mlTimerRing ${durationMs}ms linear forwards`;
+    }
+
+    /**
+     * Stops the timer-ring animation (inactive state).
+     * @param {'record'|'playback'} timerId
+     */
+    function debugTimerStop(timerId) {
+        if (!debugPanelEl) { return; }
+        const ring = debugPanelEl.querySelector('#ml-debug-ring-' + timerId);
+        const fill = debugPanelEl.querySelector('#ml-debug-fill-' + timerId);
+        if (!ring) { return; }
+        ring.style.animation = 'none';
+        if (fill) { fill.style.fill = 'transparent'; }
+    }
+
+    /**
+     * Creates the SVG timer circle widget.
+     * Returns an SVG element.
+     * @param {'record'|'playback'} timerId
+     */
+    function createTimerSvg(timerId) {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('width', '36');
+        svg.setAttribute('height', '36');
+        svg.style.cssText = 'flex-shrink:0;';
+
+        // Track ring (faint white).
+        const track = document.createElementNS(ns, 'circle');
+        track.setAttribute('cx', '18');
+        track.setAttribute('cy', '18');
+        track.setAttribute('r', '13');
+        track.setAttribute('fill', 'none');
+        track.setAttribute('stroke', 'rgba(255,255,255,0.2)');
+        track.setAttribute('stroke-width', '4');
+
+        // Fill circle (red when active, transparent when not).
+        const fill = document.createElementNS(ns, 'circle');
+        fill.id = 'ml-debug-fill-' + timerId;
+        fill.setAttribute('cx', '18');
+        fill.setAttribute('cy', '18');
+        fill.setAttribute('r', '11');
+        fill.setAttribute('fill', 'transparent');
+
+        // Progress ring (white stroke, sweeps clockwise).
+        const circ = 2 * Math.PI * 13; // ≈ 81.7
+        const ring = document.createElementNS(ns, 'circle');
+        ring.id = 'ml-debug-ring-' + timerId;
+        ring.setAttribute('cx', '18');
+        ring.setAttribute('cy', '18');
+        ring.setAttribute('r', '13');
+        ring.setAttribute('fill', 'none');
+        ring.setAttribute('stroke', 'rgba(255,255,255,0.9)');
+        ring.setAttribute('stroke-width', '4');
+        ring.setAttribute('stroke-dasharray', String(circ));
+        ring.setAttribute('stroke-dashoffset', '0');
+        ring.style.cssText = 'transform-origin:18px 18px;transform:rotate(-90deg);';
+
+        svg.appendChild(track);
+        svg.appendChild(fill);
+        svg.appendChild(ring);
+        return svg;
+    }
+
+    /**
+     * Creates one timer row for the debug panel.
+     * @param {'record'|'playback'} timerId
+     * @param {string} title
+     * @param {string} constName
+     * @param {number} constValue
+     */
+    function createTimerRow(timerId, title, constName, constValue) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.1);';
+
+        const titleEl = document.createElement('div');
+        titleEl.textContent = title;
+        titleEl.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:rgba(255,255,255,0.5);margin-bottom:4px;';
+        row.appendChild(titleEl);
+
+        const hstack = document.createElement('div');
+        hstack.style.cssText = 'display:flex;align-items:center;gap:8px;';
+
+        hstack.appendChild(createTimerSvg(timerId));
+
+        const labels = document.createElement('div');
+        labels.style.cssText = 'display:flex;flex-direction:column;gap:1px;';
+        const nameEl = document.createElement('div');
+        nameEl.textContent = constName;
+        nameEl.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.6);font-family:monospace;';
+        const valEl = document.createElement('div');
+        valEl.textContent = constValue + ' ms';
+        valEl.style.cssText = 'font-size:12px;color:#f8f9fa;font-family:monospace;';
+        labels.appendChild(nameEl);
+        labels.appendChild(valEl);
+        hstack.appendChild(labels);
+
+        row.appendChild(hstack);
+        return row;
+    }
+
+    /**
+     * Adds a keyframe rule to the document for the timer animation (idempotent).
+     */
+    function ensureTimerKeyframes() {
+        if (document.getElementById('ml-debug-keyframes')) { return; }
+        const style = document.createElement('style');
+        style.id = 'ml-debug-keyframes';
+        const circ = 2 * Math.PI * 13;
+        style.textContent = `
+            @keyframes mlTimerRing {
+                from { stroke-dashoffset: 0; }
+                to   { stroke-dashoffset: ${circ}; }
+            }
+            @keyframes mlDebugEventFadeOut {
+                from { opacity: 1; }
+                to   { opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    /**
+     * Logs a key/mouse event to the debug panel event list.
+     * @param {Event}   event
+     * @param {string}  phase
+     * @param {boolean|null} consumed
+     */
+    function logDebugEvent(event, phase, consumed) {
+        if (!isDebugPanelVisible || !debugPanelEl) { return null; }
+        const list = debugPanelEl.querySelector('#ml-debug-events');
+        if (!list) { return null; }
+
+        let keyLabel = '';
+        if (event.type === 'mousedown' || event.type === 'mouseup' || event.type === 'click') {
+            const btn = event.button === 2 ? 'right' : (event.button === 1 ? 'middle' : 'left');
+            keyLabel = btn + ' btn';
+        } else if (event.type === 'contextmenu') {
+            keyLabel = 'right btn';
+        } else {
+            const parts = [];
+            if (event.metaKey)  { parts.push('⌘'); }
+            if (event.ctrlKey)  { parts.push('⌃'); }
+            if (event.altKey)   { parts.push('⌥'); }
+            if (event.shiftKey) { parts.push('⇧'); }
+            const k = event.key;
+            if (k && k !== 'Meta' && k !== 'Control' && k !== 'Alt' && k !== 'Shift') {
+                const norm = normalizeKeyForStorage(k);
+                if (norm) {
+                    const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, norm) ? KEY_GLYPHS[norm] : null;
+                    parts.push(glyph !== null ? glyph : (norm.length === 1 ? norm.toUpperCase() : norm));
+                } else {
+                    parts.push(k);
+                }
+            } else if (k) {
+                const modGlyphs = { 'Meta': '⌘', 'Control': '⌃', 'Alt': '⌥', 'Shift': '⇧' };
+                parts.push(modGlyphs[k] || k);
+            }
+            keyLabel = parts.join('+') || '?';
+        }
+
+        const phaseShort = phase.replace('down', '↓').replace('up', '↑');
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:2px 4px;font-size:11px;font-family:monospace;color:#f8f9fa;border-bottom:1px solid rgba(255,255,255,0.06);';
+
+        const left = document.createElement('span');
+        left.textContent = `${keyLabel}  ${phaseShort}`;
+        row.appendChild(left);
+
+        const right = document.createElement('span');
+        right.id = 'ml-debug-event-status-' + (++debugEventCounter);
+        if (consumed === true) {
+            right.textContent = 'consumed';
+            right.style.color = '#f87171';
+        } else if (consumed === false) {
+            right.textContent = 'passed';
+            right.style.color = '#86efac';
+        } else {
+            right.textContent = '…';
+            right.style.color = 'rgba(255,255,255,0.4)';
+        }
+        row.appendChild(right);
+
+        list.insertBefore(row, list.firstChild);
+
+        while (list.childElementCount > 30) {
+            list.removeChild(list.lastChild);
+        }
+
+        const fadeDelay = Math.max(0, DEBUG_EVENT_DISPLAY_MS - DEBUG_EVENT_FADEOUT_MS);
+        setTimeout(() => {
+            row.style.animation = `mlDebugEventFadeOut ${DEBUG_EVENT_FADEOUT_MS}ms linear forwards`;
+            setTimeout(() => { if (row.parentNode) { row.remove(); } }, DEBUG_EVENT_FADEOUT_MS);
+        }, fadeDelay);
+
+        return { row, statusEl: right };
+    }
+
+    /**
+     * Marks a previously-logged event row as consumed or passed.
+     * @param {{ row: HTMLElement, statusEl: HTMLElement }|null} handle
+     * @param {boolean} consumed
+     */
+    function markDebugEventStatus(handle, consumed) {
+        if (!handle || !handle.statusEl) { return; }
+        if (consumed) {
+            handle.statusEl.textContent = 'consumed';
+            handle.statusEl.style.color = '#f87171';
+        } else {
+            handle.statusEl.textContent = 'passed';
+            handle.statusEl.style.color = '#86efac';
+        }
+    }
+
+    /**
+     * Updates the static info rows (state, held keys, last action, cursor).
+     */
+    function updateDebugPanelState() {
+        if (!isDebugPanelVisible || !debugPanelEl) { return; }
+
+        const stateEl = debugPanelEl.querySelector('#ml-debug-state');
+        if (stateEl) {
+            let stateStr = 'idle';
+            if (recordingAction) {
+                stateStr = `recording: ${ACTION_LABELS[recordingAction] || recordingAction}`;
+            } else if (inferBufferActive) {
+                stateStr = `buffer active (${inferBufferLinks.length} links)`;
+            } else {
+                const advancing = Object.keys(chordProgress).filter((k) => !!chordProgress[k]);
+                if (advancing.length > 0) {
+                    stateStr = `chord advancing: ${advancing.join(', ')}`;
+                }
+            }
+            stateEl.textContent = stateStr;
+        }
+
+        const heldEl = debugPanelEl.querySelector('#ml-debug-held-keys');
+        if (heldEl) {
+            if (pressedKeys.size === 0) {
+                heldEl.textContent = '—';
+            } else {
+                heldEl.textContent = Array.from(pressedKeys).map((k) => {
+                    const glyph = Object.prototype.hasOwnProperty.call(KEY_GLYPHS, k) ? KEY_GLYPHS[k] : null;
+                    return glyph !== null ? glyph : (k.length === 1 ? k.toUpperCase() : k);
+                }).join('  ');
+            }
+        }
+    }
+
+    /**
+     * Updates the last-action row with a label string.
+     * @param {string} label
+     */
+    function setDebugLastAction(label) {
+        if (!debugPanelEl) { return; }
+        const el = debugPanelEl.querySelector('#ml-debug-last-action');
+        if (el) { el.textContent = label; }
+    }
+
+    /**
+     * Throttled cursor-info update.
+     */
+    function updateDebugCursor() {
+        if (!isDebugPanelVisible || !debugPanelEl) { return; }
+        const el = debugPanelEl.querySelector('#ml-debug-cursor');
+        if (!el) { return; }
+        try {
+            const target = document.elementFromPoint(mouseX, mouseY);
+            const anchor = target ? target.closest('a') : null;
+            const url = anchor ? anchor.href : window.location.href;
+            const truncUrl = url ? url.substring(0, 70) : '—';
+            const kind = anchor ? 'anchor' : 'page';
+            el.textContent = `x:${mouseX}  y:${mouseY}  ${kind}: ${truncUrl}`;
+        } catch (e) {
+            el.textContent = `x:${mouseX}  y:${mouseY}`;
+        }
+    }
+
+    /**
+     * Builds and shows the debug panel. Idempotent.
+     */
+    function openDebugPanel() {
+        if (isDebugPanelVisible && debugPanelEl && document.body.contains(debugPanelEl)) { return; }
+        ensureTimerKeyframes();
+        isDebugPanelVisible = true;
+
+        if (!debugPanelEl) {
+            const panel = document.createElement('div');
+            panel.id = 'ml-debug-panel';
+            panel.style.cssText = [
+                'position:fixed',
+                'top:12px',
+                'right:12px',
+                'width:260px',
+                'background:rgba(17,17,27,0.92)',
+                'backdrop-filter:blur(6px)',
+                'border:1px solid rgba(255,255,255,0.15)',
+                'border-radius:8px',
+                'padding:10px 12px',
+                'z-index:1000002',
+                'font-family:sans-serif',
+                'color:#f8f9fa',
+                'box-shadow:0 4px 24px rgba(0,0,0,0.5)',
+                'max-height:80vh',
+                'overflow-y:auto',
+            ].join(';');
+
+            const header = document.createElement('div');
+            header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;';
+            const title = document.createElement('span');
+            title.textContent = '🔧 Debug';
+            title.style.cssText = 'font-size:12px;font-weight:700;letter-spacing:0.04em;color:#f8f9fa;';
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '✕';
+            closeBtn.style.cssText = 'background:none;border:none;color:rgba(255,255,255,0.5);font-size:12px;cursor:pointer;padding:0 2px;';
+            closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeDebugPanel(); });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            panel.appendChild(header);
+
+            function sectionLabel(text) {
+                const el = document.createElement('div');
+                el.textContent = text;
+                el.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);margin:8px 0 2px;';
+                return el;
+            }
+
+            function infoRow(labelText, id) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);';
+                const lbl = document.createElement('span');
+                lbl.textContent = labelText;
+                lbl.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.5);flex-shrink:0;margin-right:6px;';
+                const val = document.createElement('span');
+                val.id = id;
+                val.textContent = '—';
+                val.style.cssText = 'font-size:11px;color:#f8f9fa;text-align:right;word-break:break-all;';
+                row.appendChild(lbl);
+                row.appendChild(val);
+                return row;
+            }
+
+            panel.appendChild(sectionLabel('State'));
+            panel.appendChild(infoRow('script', 'ml-debug-state'));
+            panel.appendChild(infoRow('held keys', 'ml-debug-held-keys'));
+            panel.appendChild(infoRow('last action', 'ml-debug-last-action'));
+
+            panel.appendChild(sectionLabel('Cursor'));
+            const cursorRow = document.createElement('div');
+            cursorRow.style.cssText = 'padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.07);';
+            const cursorSpan = document.createElement('span');
+            cursorSpan.id = 'ml-debug-cursor';
+            cursorSpan.textContent = 'x:—  y:—  target:—';
+            cursorSpan.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.7);font-family:monospace;word-break:break-all;';
+            cursorRow.appendChild(cursorSpan);
+            panel.appendChild(cursorRow);
+
+            panel.appendChild(sectionLabel('Chord timers'));
+            panel.appendChild(createTimerRow('record',   'Record pause',    'CHORD_RECORD_TIMEOUT_MS',   CHORD_RECORD_TIMEOUT_MS));
+            panel.appendChild(createTimerRow('playback', 'Playback window', 'CHORD_PLAYBACK_TIMEOUT_MS', CHORD_PLAYBACK_TIMEOUT_MS));
+
+            const evtHeader = document.createElement('div');
+            evtHeader.style.cssText = 'display:flex;align-items:center;gap:4px;margin:8px 0 2px;';
+            const evtLabel = document.createElement('span');
+            evtLabel.textContent = 'EVENTS';
+            evtLabel.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);';
+            const helpBtn = document.createElement('button');
+            helpBtn.textContent = '?';
+            helpBtn.style.cssText = 'background:none;border:1px solid rgba(255,255,255,0.3);border-radius:50%;color:rgba(255,255,255,0.5);font-size:9px;width:14px;height:14px;cursor:pointer;line-height:1;padding:0;';
+            helpBtn.title = [
+                'consumed — script called preventDefault() on this event.',
+                '  The event stops here and is not delivered to the page.',
+                '',
+                'passed — script let this event through normally.',
+                '',
+                'Mouse down/up events are observed (debug-only listeners);',
+                '  the script never consumes them directly.',
+            ].join('\n');
+            evtHeader.appendChild(evtLabel);
+            evtHeader.appendChild(helpBtn);
+            panel.appendChild(evtHeader);
+
+            const eventList = document.createElement('div');
+            eventList.id = 'ml-debug-events';
+            eventList.style.cssText = 'max-height:180px;overflow-y:auto;';
+            panel.appendChild(eventList);
+
+            document.body.appendChild(panel);
+            debugPanelEl = panel;
+        } else {
+            document.body.appendChild(debugPanelEl);
+        }
+
+        updateDebugPanelState();
+        updateDebugCursor();
+    }
+
+    /** Hides the debug panel (keeps DOM intact so event list is preserved). */
+    function closeDebugPanel() {
+        isDebugPanelVisible = false;
+        if (debugPanelEl && debugPanelEl.parentNode) {
+            debugPanelEl.remove();
+        }
+    }
+
+    /** Toggles the debug panel. No-op when isDebug is false. */
+    function toggleDebugPanel() {
+        if (!isDebug) { return; }
+        if (isDebugPanelVisible) {
+            closeDebugPanel();
+        } else {
+            openDebugPanel();
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+
+    // ---- Debug panel capture listeners -----------------------------------------
+    // Registered before all other listeners so events are logged before any handler
+    // decides to consume them.
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'z' || event.key === 'Z') {
-            isZKeyDown = true;
-        }
+        if (!isDebugPanelVisible) { return; }
+        if (event.repeat) { return; }
+        debugLastKeyEventEl = logDebugEvent(event, 'keydown', null);
+        updateDebugPanelState();
     }, true);
-    
+
     document.addEventListener('keyup', (event) => {
-        if (event.key === 'z' || event.key === 'Z') {
-            isZKeyDown = false;
-        }
+        if (!isDebugPanelVisible) { return; }
+        logDebugEvent(event, 'keyup', null);
+        updateDebugPanelState();
+    }, true);
+
+    document.addEventListener('mousedown', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        logDebugEvent(event, 'mousedown', false);
+    }, true);
+
+    document.addEventListener('mouseup', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        logDebugEvent(event, 'mouseup', false);
+    }, true);
+
+    document.addEventListener('click', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        debugLastClickEventEl = logDebugEvent(event, 'click', null);
+    }, true);
+
+    document.addEventListener('contextmenu', (event) => {
+        if (!isDebugPanelVisible) { return; }
+        debugLastClickEventEl = logDebugEvent(event, 'contextmenu', null);
+    }, true);
+    // ---------------------------------------------------------------------------
+
+    // Capture-phase key tracker — must be registered BEFORE handleKeydown so
+    // pressedKeys is current when handleKeydown runs.
+    log('Will add keydown listener to track pressed keys (using capture phase, registered FIRST so fires FIRST)');
+
+    document.addEventListener('keydown', (event) => {
+        const storageKey = normalizeKeyForStorage(event.key);
+        if (storageKey) { pressedKeys.add(storageKey); }
+    }, true);
+
+    document.addEventListener('keyup', (event) => {
+        const storageKey = normalizeKeyForStorage(event.key);
+        if (storageKey) { pressedKeys.delete(storageKey); }
     }, true);
     log('Did add keydown listener for key tracking');
-    
+
     log('Registering keydown listener for Alt+M handler (registered SECOND so fires SECOND during capture)');
     document.addEventListener('keydown', handleKeydown, true);
     log('Did register keydown listener for Alt+M handler');
-    
+
+    // Bubble-phase keyup: finalize inferBuffer when any hold key is released.
     log('Will add keyup listener to track key releases');
     document.addEventListener('keyup', (event) => {
         logFunctionBegin('keyup tracker');
-        log(`Key released: ${event.key}, altKey=${event.altKey}`);
-        
-        // Debug: Log current state
-        console.log(`[MARKDOWN_LINKER_DEBUG] KeyUp: released=${event.key}, altKey=${event.altKey}, buffer active=${isAltZBufferActive}, buffer size=${altZClickBuffer.length}`);
-        
-        // Check if Alt+Z combo WAS active before this key release
-        // At keyup time: event.altKey is already false for the Alt key, so we check what's being released
-        const isAltReleasing = event.key === 'Alt';
-        const isZReleasing = event.key === 'z' || event.key === 'Z';
-        const wasAltZActive = isAltZBufferActive;  // We use the flag we set during clicks
-        
-        log(`Alt releasing: ${isAltReleasing}, Z releasing: ${isZReleasing}, Was Alt+Z active: ${wasAltZActive}`);
-        
-        // If Alt+Z combo was active and we're releasing Alt or Z, process buffer
-        if (wasAltZActive && (isAltReleasing || isZReleasing)) {
-            log(`Alt+Z was deactivated, processing buffer with ${altZClickBuffer.length} buffered links`);
-            
-            // Deactivate buffer mode
-            isAltZBufferActive = false;
-            
-            if (altZClickBuffer.length > 0) {
-                log('Will compile buffered links into markdown list');
-                compileAndCopyBufferedLinks(altZClickBuffer);
-                // Clear buffer after processing
-                const count = altZClickBuffer.length;
-                altZClickBuffer = [];
-                log(`Did process ${count} links and clear buffer`);
-            } else {
-                log('Buffer is empty, nothing to copy');
-            }
-        } else {
-            log('Alt+Z was not active or combo still active, skipping buffer processing');
+        if (!inferBufferActive) {
+            logFunctionEnd('keyup tracker');
+            return;
         }
-        
+        log(`Key released during buffer: key=${event.key}, links=${inferBufferLinks.length}`);
+
+        let shouldFinalize = false;
+
+        // Check modifier hold keys (event.key is the modifier name when a modifier key fires).
+        if (event.key === 'Meta'    && inferBufferHoldMeta)  { shouldFinalize = true; }
+        if (event.key === 'Control' && inferBufferHoldCtrl)  { shouldFinalize = true; }
+        if (event.key === 'Alt'     && inferBufferHoldAlt)   { shouldFinalize = true; }
+        if (event.key === 'Shift'   && inferBufferHoldShift) { shouldFinalize = true; }
+
+        // Check non-modifier hold keys (e.g. 'z').
+        if (!shouldFinalize) {
+            const releasedKey = normalizeKeyForStorage(event.key);
+            if (releasedKey && inferBufferHoldKeys.has(releasedKey)) {
+                shouldFinalize = true;
+            }
+        }
+
+        if (shouldFinalize) {
+            log(`Hold key released (${event.key}), finalizing buffer`);
+            finalizeInferBuffer();
+        }
+
         logFunctionEnd('keyup tracker');
-    }, false);  // Use bubble phase (false) so it fires AFTER capture phase handlers
+    }, false);  // bubble phase — fires AFTER capture-phase key-tracker removes the key from pressedKeys
     log('Did add keyup listener for key tracking');
 
     // ============================================================================
@@ -3700,7 +5721,7 @@
     log('Did register contextmenu listener');
 
     log('All event listeners registered');
-    log('Triggers: Alt+Click (show menu), Alt+Z+Click (auto-infer), Alt+Right-Click, or Alt+M');
+    log('Triggers (configurable): hover+V = menu, hover+B = quiet copy, hold Z + click… = buffer list');
     log('Script initialization complete');
 
 })();

@@ -13,5 +13,8 @@ import '../lib/index.js';
 // YouTube Toolkit (populates window.YouTubeToolkit via its require() graph)
 import '../lib-youtube/index.js';
 
+// Source capture dev tool (populates window.SourceCapture)
+import '../lib-capture/source_capture.js';
+
 // Main Markdown Linker userscript source
 import './markdown_linker.source.js';

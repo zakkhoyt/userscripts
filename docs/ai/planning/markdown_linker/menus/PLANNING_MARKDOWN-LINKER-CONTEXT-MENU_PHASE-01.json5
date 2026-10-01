@@ -1,0 +1,178 @@
+// This JSON5 file serves as a template for the structure of the context menu data. 
+// It defines the expected hierarchy, format, and fields for the menu, menu sections, and menu items. 
+// This is intended to guide the creation of:
+// * The Popup Menu
+// * The Context Menu
+
+
+// // Template / Schema
+// // # All `_element` types:
+// // * menu: The entire menu structure
+// // * menu_item: An abstraction for both menu_section and menu_cell, as they both contain menu_items. This allows for recursive nesting of sections and cells.
+// //   * menu_section: A container for grouping related menu items, which can include both other sections and cells. It has a title and an array of menu_items, allowing for nested structures.
+// //   * menu_cell: A leaf node in the menu structure, representing an individual actionable item. It has a title, text, and an optional tooltip.
+// {
+//   {
+//     "_element": "menu",                 // UI element: menu
+//     "title": "",                        // The title of the menu
+//     "tooltip": "",                      // The tooltip text for the menu item (or info icon)
+//     "menu_items": [                     // An array of menu items within this section
+//       {
+//         "_element": "menu_section",     // UI element: menu_section
+//         "title": "",                    // The title of the menu section
+//         "tooltip": "",                  // The tooltip text for the menu item (or info icon)
+//         "menu_items": [                 // An array of menu items within this section    
+//          {
+//             "_element": "menu_cell",    // UI element: menu_cell
+//             "title": "",                // The title of the menu item
+//             "text": "",                 // The text content of the menu item
+//             "tooltip": ""               // The tooltip text for the menu item (or info icon)
+//           }
+//         ]
+//       }
+//     ]
+//   }
+// }
+
+
+
+{
+  "_element": "menu",
+  "title": "Links",
+  "tooltip": "",
+  "menu_items": [
+    {
+      "_element": "menu_section",
+      "title": "--- DOMAIN SPECIFIC ---",
+      "tooltip": "Link titles are generated based on the url.domain",
+      "menu_items": [
+        {
+          "_element": "menu_cell",
+          "title": "VIDEO TITLE",
+          "text": "YouTube: wavywebsurf - Uploads from wavywebsurf",
+          "tooltip": null
+        },
+        {
+          "_element": "menu_cell",
+          "title": "TIMESTAMP",
+          "text": "YouTube: wavywebsurf - Uploads from wavywebsurf @ 00:56",
+          "tooltip": null
+        },
+        {
+          "_element": "menu_cell",
+          "title": "PLAYLIST MARKDOWN",
+          "text": "99 entries",
+          "tooltip": null
+        },
+        {
+          "_element": "menu_cell",
+          "title": "PLAYLIST LINK",
+          "text": "Uploads from wavywebsurf",
+          "tooltip": null
+        },
+        {
+          "_element": "menu_cell",
+          "title": "CHANNEL LINK",
+          "text": "wavywebsurf",
+          "tooltip": null
+        }
+      ],
+    },
+    {
+      "_element": "menu_section",
+      "title": "--- COMMMON ---",
+      "tooltip": "Link titles are generated based on common URL properties, such as domain, path segments, etc...",
+      "menu_items": [
+        {
+          "_element": "menu_cell",
+          "title": "PAGE TITLE",
+          "text": "(29) The Cursed Meme Linked To Attempted Murder - YouTube",
+          "tooltip": null
+        },
+        {
+          "_element": "menu_cell",
+          "title": "URL (FORWARD)",
+          "text": "YouTube: Watch",
+          "tooltip": null
+        },
+        {
+          "_element": "menu_cell",
+          "title": "URL (REVERSE)",
+          "text": "YouTube: Watch",
+          "tooltip": null
+        }
+      ]
+    },
+    {
+      "_element": "menu_section",
+      "title": "--- LISTS ---",
+      "tooltip": "",
+      "menu_items": [
+        {
+          "_element": "menu_cell",
+          "title": "TREE LIST: ALL LINKS",
+          "text": "A heirarchical list of ALL urls"
+        },
+        {
+          "_element": "menu_cell",
+          "title": "FLAT LIST: ALL LINKS",
+          "text": "A flat list of ALL urls",
+          "tooltip": "Preserves heading depth"
+        },
+        {
+          "_element": "menu_cell",
+          "title": "DEBUG",
+          "text": "All Link Variants (Common & Domain Specific)"
+        },
+      ]
+    },
+    {
+      "_element": "menu_section",
+      "title": "--- PAGE ---",
+      "tooltip": "",
+      "menu_items": [
+        {
+          "_element": "menu_cell",
+          "title": "ALL LINKS",
+          "text": "All links (hierarchical list)",
+          "tooltip": "A hierarchical list of ALL links (default format) in the current page."
+        },
+        {
+          "_element": "menu_cell",
+          "title": "ALL LINKS (FLAT)",
+          "text": "All links (flat list)",
+          "tooltip": "A flattened list of ALL links (default format) in the current page."
+        }
+      ]
+    },
+    {
+      "_element": "menu_section",
+      "title": "--- SETTINGS ---",
+      "tooltip": "",
+      "menu_items": [
+        {
+          "_element": "menu_cell",
+          "title": "APP SETTINGS",
+          "text": "Preferences for the Markdown Linker",
+          "tooltip": "This will open the app settings page, where you can customize various aspects of the Markdown Linker, such as link generation rules, formatting options, keyboard shortcuts, etc..."
+        }
+      ]
+    },
+    {
+      "_element": "menu_section",
+      "title": "--- DEVELOPER ---",
+      "tooltip": "A menu section dedicated to developer/debug tools & options. Only visible when a developer mode is enabled.",
+      "menu_items": [
+        {
+          "_element": "menu_cell",
+          "title": "ALL LINK VARIANTS",
+          "text": "(List) All link variants (common & domain specific) of the target URL",
+          "tooltip": "Useful debug/test tool that shows all generated link variants for the target URL in a single list"
+        }
+      ]
+    },
+  ]
+}
+
+
+

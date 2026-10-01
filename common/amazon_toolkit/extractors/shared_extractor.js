@@ -446,17 +446,47 @@ function extractProductPrice(doc) {
         // Continue
     }
 
-    // Try HTML price elements
+    // Preferred: the main buy-price as a full offscreen string (e.g. "$49.99"). Scoping to
+    // ".a-price .a-offscreen" (offscreen INSIDE an a-price block) avoids unrelated ".a-offscreen"
+    // spans such as per-unit prices ("$2.50 / Count") or ratings ("4.4 out of 5 stars").
     try {
-        const selectors = [
-            '.a-price .a-offscreen',
-            '#priceblock_ourprice',
-            '#priceblock_dealprice',
-            '#priceblock_saleprice',
-            '.a-price-whole'
-        ];
+        const offscreenElement = safeQuery('.a-price .a-offscreen', doc);
+        if (offscreenElement) {
+            const text = safeText(offscreenElement);
+            if (text && isValidPrice(text)) {
+                return text;
+            }
+        }
+    } catch (error) {
+        // Continue
+    }
 
-        for (const selector of selectors) {
+    // Fallback: apparel/variant pages often render the price only as split parts without a usable
+    // offscreen, which previously yielded a truncated "49." (.a-price-whole text includes a trailing
+    // decimal point from its nested .a-price-decimal child). Reconstruct from the first
+    // .a-price-whole (the same element the legacy fallback used), pulling the symbol and fraction
+    // from the SAME price block (its parent) so the value is complete and self-consistent.
+    try {
+        const wholeElement = safeQuery('.a-price-whole', doc);
+        if (wholeElement) {
+            const whole = (safeText(wholeElement) || '').replace(/[^\d]/g, '');
+            if (whole) {
+                const scope = wholeElement.parentElement || doc;
+                const symbolRaw = safeText(safeQuery('.a-price-symbol', scope)) || '$';
+                const symbol = symbolRaw.replace(/\s/g, '') || '$';
+                const fractionElement = safeQuery('.a-price-fraction', scope);
+                const fraction = fractionElement ? (safeText(fractionElement) || '').replace(/[^\d]/g, '') : '';
+                return fraction ? `${symbol}${whole}.${fraction}` : `${symbol}${whole}`;
+            }
+        }
+    } catch (error) {
+        // Continue
+    }
+
+    // Legacy priceblock ids (older Amazon layouts)
+    try {
+        const legacySelectors = ['#priceblock_ourprice', '#priceblock_dealprice', '#priceblock_saleprice'];
+        for (const selector of legacySelectors) {
             const element = safeQuery(selector, doc);
             if (element) {
                 const text = safeText(element);

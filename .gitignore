@@ -3,6 +3,10 @@
 **/_gitignored/
 **/.gitignored/
 
+# Python bytecode (e.g. scripts/source_capture receiver imported by tests)
+**/__pycache__/
+*.pyc
+
 # ---- Z2k project specific
 
 **/reference/
@@ -239,3 +243,7 @@ Network Trash Folder
 Temporary Items
 .apdisk
 .ai
+
+
+
+docs/ai/planning/item_blocker/input/ps5_wall_mount_complete/ps5 wall mount _ Thangs Search_complete_files/**
