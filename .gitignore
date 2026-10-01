@@ -242,8 +242,11 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
-.ai
+# Adobe Illustrator files. NOTE: a bare ".ai" also matches any *directory*
+# named .ai (gitignore "*" matches zero chars), which swallowed docs/.ai/.
+*.ai
+!.ai/
 
 
 
-docs/ai/planning/item_blocker/input/ps5_wall_mount_complete/ps5 wall mount _ Thangs Search_complete_files/**
+# Downloaded HTML / saved-page references live under a .gitignored/ dir (see line 4)
