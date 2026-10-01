@@ -80,11 +80,33 @@ function parseISODuration(isoDuration) {
     return totalSeconds > 0 ? totalSeconds : null;
 }
 
+/**
+ * Builds a YouTube `t=` query parameter using the readable `##h##m##s` form.
+ *
+ * A bare seconds count (`t=555`) is opaque once past a minute; `t=09m15s` is not.
+ * YouTube accepts both, plus zero-padded variants (`t=0h09m15s`).
+ *
+ * Minutes and seconds are zero-padded to two digits and the hours component is
+ * omitted when zero, so the value lines up with `secondsToClock()` output:
+ * `09:15` -> `t=09m15s`, `1:02:03` -> `t=1h02m03s`.
+ *
+ * @param {number} seconds - Playback offset in seconds
+ * @returns {string|null} Parameter string (e.g. `t=09m15s`), or null when invalid
+ * Reference: https://support.google.com/youtube/answer/57792
+ */
 function formatTimestampParam(seconds) {
     if (!Number.isFinite(seconds) || seconds <= 0) {
         return null;
     }
-    return `t=${Math.floor(seconds)}s`;
+    const wholeSeconds = Math.floor(seconds);
+    const hours = Math.floor(wholeSeconds / 3600);
+    const minutes = Math.floor((wholeSeconds % 3600) / 60);
+    const secs = wholeSeconds % 60;
+    const pad = (value) => value.toString().padStart(2, '0');
+    if (hours > 0) {
+        return `t=${hours}h${pad(minutes)}m${pad(secs)}s`;
+    }
+    return `t=${pad(minutes)}m${pad(secs)}s`;
 }
 
 module.exports = {
