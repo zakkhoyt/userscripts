@@ -22,31 +22,46 @@
 
  -->
 
+ 
+<!-- 
+# Regarding the query parameter key/value for `t`
+
+
+## Drop leading `0`s
+
+
+I'm testing and seeing some things that need changed;
+Here is what I'm getting for a timestamp at 45 seconds:  [YouTube: J Perm - Rubik's Cube: Easy 2-Look OLL Tutorial (Beginner CFOP) @ 00:45](https://youtu.be/GhmYBgLoQQg?t=00m45s)
 
 
 
-## Drop leading 0s
-* When computing, no need to include leading `0` terms, or leading `0` digits. 
+
+## Drop leading time divisions which have no value
+* When computing, no need to include (let's drop or exclude):
+  * leading time division(s) that equal `0`
+
+* EX: `https://youtu.be/GhmYBgLoQQg?t=00m45s` -> `https://youtu.be/GhmYBgLoQQg?t=45s`
+
+
+
+## Drop leading `0` within each time division
+
+No need to include extra leading `0`s. 
+* EX: `https://youtu.be/GhmYBgLoQQg?t=00m07s` -> `https://youtu.be/GhmYBgLoQQg?t=7s`
+
+## More examples
+
   * EX:  `t=00h13m15s`  -> `t=13m15s`
   * EX:  `t=00h03m05s`  -> `t=3m5s`
-  * EX:  `t=00h00m15s`  -> `t=15s` -> `t=15`
+  * EX:  `t=00h00m15s`  -> `t=15s`
+  * EX:  `t=00h00m02s`  -> `t=02s` -> `t=2s`
+  * EX:  `t=01h00m07s`  -> `t=1h7s`
 
 
+----
 
-# GitHub
+Also I found a bug related to youtube.com timestamp links
 
-* [github.com: zakkhoyt/userscripts - Zakk/markdown linker domains](https://github.com/zakkhoyt/userscripts/pull/12/changes#diff-7962a467862baccea309d6c43425f90c50ab2d131a20154fa03039b125675e1b)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+* When I load a youtube video and star playing it, the initial invokation of markdown_linker menu works correctly and generates a menu entry for `timestamp` with the appropriate timestamp value in the URL and the title (disregarding the time formatting complaints above)
+* However any subsequent invokatoins of the markdown_linker will present that same initial link (stale timestamp). 
+* I'm guessing that when we are generating links that we are caching that first link in place of `nil` and the subsequent checks see that cached value and never create a new one (or somethign) -->
