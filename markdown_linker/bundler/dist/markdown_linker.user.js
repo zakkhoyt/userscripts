@@ -3199,11 +3199,17 @@ ${textLink}`;
         const hours = Math.floor(wholeSeconds / 3600);
         const minutes = Math.floor(wholeSeconds % 3600 / 60);
         const secs = wholeSeconds % 60;
-        const pad = (value) => value.toString().padStart(2, "0");
+        const parts = [];
         if (hours > 0) {
-          return `t=${hours}h${pad(minutes)}m${pad(secs)}s`;
+          parts.push(`${hours}h`);
         }
-        return `t=${pad(minutes)}m${pad(secs)}s`;
+        if (minutes > 0) {
+          parts.push(`${minutes}m`);
+        }
+        if (secs > 0) {
+          parts.push(`${secs}s`);
+        }
+        return parts.length > 0 ? `t=${parts.join("")}` : null;
       }
       module.exports = {
         secondsToTimestamp,
@@ -4190,11 +4196,6 @@ ${textLink}`;
         return null;
       }
       const cacheKey = videoId ? `fallback-video:${videoId}` : `fallback-url:${canonicalUrl}`;
-      if (cacheKey && youtubeContextCacheKey === cacheKey && youtubeContextCacheValue) {
-        log("Using cached fallback YouTube context");
-        logFunctionEnd("buildYouTubeFallbackContext");
-        return youtubeContextCacheValue;
-      }
       if (cacheKey) {
         youtubeContextCacheKey = cacheKey;
       }
@@ -4253,12 +4254,17 @@ ${textLink}`;
       const hours = Math.floor(totalSeconds / 3600);
       const minutes = Math.floor(totalSeconds % 3600 / 60);
       const secs = totalSeconds % 60;
-      const paddedMinutes = String(minutes).padStart(2, "0");
-      const paddedSeconds = String(secs).padStart(2, "0");
+      const parts = [];
       if (hours > 0) {
-        return `${hours}h${paddedMinutes}m${paddedSeconds}s`;
+        parts.push(`${hours}h`);
       }
-      return `${paddedMinutes}m${paddedSeconds}s`;
+      if (minutes > 0) {
+        parts.push(`${minutes}m`);
+      }
+      if (secs > 0) {
+        parts.push(`${secs}s`);
+      }
+      return parts.length > 0 ? parts.join("") : "0s";
     }
     function isLikelyYouTubeDescription(candidate) {
       if (!candidate) {
@@ -4369,6 +4375,20 @@ ${textLink}`;
         playlistId: currentPlaylistId || targetPlaylistId || null
       };
     }
+    function readYouTubePlaybackState(toolkit) {
+      const videoExtractor = toolkit?.Extractors?.Video;
+      if (videoExtractor && typeof videoExtractor.extractPlaybackState === "function") {
+        const extracted = videoExtractor.extractPlaybackState(document);
+        if (extracted && Number.isFinite(extracted.seconds)) {
+          return extracted;
+        }
+      }
+      const videoElement = document.querySelector("video");
+      if (videoElement && typeof videoElement.currentTime === "number" && Number.isFinite(videoElement.currentTime)) {
+        return { isActive: true, seconds: videoElement.currentTime };
+      }
+      return null;
+    }
     function getYouTubeContext(url) {
       logFunctionBegin("getYouTubeContext");
       if (!url || !isYouTubeUrl(url)) {
@@ -4391,9 +4411,13 @@ ${textLink}`;
         return fallbackContext;
       }
       if (youtubeContextCacheKey === intent.key && youtubeContextCacheValue) {
-        log("Using cached YouTube context");
+        const refreshed = Object.assign({}, youtubeContextCacheValue, {
+          playback: readYouTubePlaybackState(toolkit)
+        });
+        youtubeContextCacheValue = refreshed;
+        log(`Using cached YouTube context with refreshed playback (seconds=${refreshed.playback ? refreshed.playback.seconds : "n/a"})`);
         logFunctionEnd("getYouTubeContext");
-        return youtubeContextCacheValue;
+        return refreshed;
       }
       const pageStateExtractor = toolkit?.Extractors?.PageState;
       const videoExtractor = toolkit?.Extractors?.Video;

@@ -81,17 +81,16 @@ function parseISODuration(isoDuration) {
 }
 
 /**
- * Builds a YouTube `t=` query parameter using the readable `##h##m##s` form.
+ * Builds a YouTube `t=` query parameter using the shortest readable `#h#m#s` form.
  *
- * A bare seconds count (`t=555`) is opaque once past a minute; `t=09m15s` is not.
- * YouTube accepts both, plus zero-padded variants (`t=0h09m15s`).
+ * A bare seconds count (`t=555`) is opaque once past a minute; `t=9m15s` is not.
  *
- * Minutes and seconds are zero-padded to two digits and the hours component is
- * omitted when zero, so the value lines up with `secondsToClock()` output:
- * `09:15` -> `t=09m15s`, `1:02:03` -> `t=1h02m03s`.
+ * Emits only the divisions that carry a value, with no zero padding. A zero
+ * division is dropped entirely, including an interior one
+ * (`3607s` -> `t=1h7s`, not `t=1h0m7s`).
  *
  * @param {number} seconds - Playback offset in seconds
- * @returns {string|null} Parameter string (e.g. `t=09m15s`), or null when invalid
+ * @returns {string|null} Parameter string (e.g. `t=9m15s`, `t=1h7s`), or null when invalid
  * Reference: https://support.google.com/youtube/answer/57792
  */
 function formatTimestampParam(seconds) {
@@ -102,11 +101,17 @@ function formatTimestampParam(seconds) {
     const hours = Math.floor(wholeSeconds / 3600);
     const minutes = Math.floor((wholeSeconds % 3600) / 60);
     const secs = wholeSeconds % 60;
-    const pad = (value) => value.toString().padStart(2, '0');
+    const parts = [];
     if (hours > 0) {
-        return `t=${hours}h${pad(minutes)}m${pad(secs)}s`;
+        parts.push(`${hours}h`);
     }
-    return `t=${pad(minutes)}m${pad(secs)}s`;
+    if (minutes > 0) {
+        parts.push(`${minutes}m`);
+    }
+    if (secs > 0) {
+        parts.push(`${secs}s`);
+    }
+    return parts.length > 0 ? `t=${parts.join('')}` : null;
 }
 
 module.exports = {
