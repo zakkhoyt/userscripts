@@ -3195,7 +3195,21 @@ ${textLink}`;
         if (!Number.isFinite(seconds) || seconds <= 0) {
           return null;
         }
-        return `t=${Math.floor(seconds)}s`;
+        const wholeSeconds = Math.floor(seconds);
+        const hours = Math.floor(wholeSeconds / 3600);
+        const minutes = Math.floor(wholeSeconds % 3600 / 60);
+        const secs = wholeSeconds % 60;
+        const parts = [];
+        if (hours > 0) {
+          parts.push(`${hours}h`);
+        }
+        if (minutes > 0) {
+          parts.push(`${minutes}m`);
+        }
+        if (secs > 0) {
+          parts.push(`${secs}s`);
+        }
+        return parts.length > 0 ? `t=${parts.join("")}` : null;
       }
       module.exports = {
         secondsToTimestamp,
@@ -4182,11 +4196,6 @@ ${textLink}`;
         return null;
       }
       const cacheKey = videoId ? `fallback-video:${videoId}` : `fallback-url:${canonicalUrl}`;
-      if (cacheKey && youtubeContextCacheKey === cacheKey && youtubeContextCacheValue) {
-        log("Using cached fallback YouTube context");
-        logFunctionEnd("buildYouTubeFallbackContext");
-        return youtubeContextCacheValue;
-      }
       if (cacheKey) {
         youtubeContextCacheKey = cacheKey;
       }
@@ -4236,6 +4245,26 @@ ${textLink}`;
         return `${hours}:${paddedMinutes}:${paddedSeconds}`;
       }
       return `${paddedMinutes}:${paddedSeconds}`;
+    }
+    function formatSecondsAsUrlTimestamp(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        return null;
+      }
+      const totalSeconds = Math.floor(seconds);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor(totalSeconds % 3600 / 60);
+      const secs = totalSeconds % 60;
+      const parts = [];
+      if (hours > 0) {
+        parts.push(`${hours}h`);
+      }
+      if (minutes > 0) {
+        parts.push(`${minutes}m`);
+      }
+      if (secs > 0) {
+        parts.push(`${secs}s`);
+      }
+      return parts.length > 0 ? parts.join("") : "0s";
     }
     function isLikelyYouTubeDescription(candidate) {
       if (!candidate) {
@@ -4346,6 +4375,20 @@ ${textLink}`;
         playlistId: currentPlaylistId || targetPlaylistId || null
       };
     }
+    function readYouTubePlaybackState(toolkit) {
+      const videoExtractor = toolkit?.Extractors?.Video;
+      if (videoExtractor && typeof videoExtractor.extractPlaybackState === "function") {
+        const extracted = videoExtractor.extractPlaybackState(document);
+        if (extracted && Number.isFinite(extracted.seconds)) {
+          return extracted;
+        }
+      }
+      const videoElement = document.querySelector("video");
+      if (videoElement && typeof videoElement.currentTime === "number" && Number.isFinite(videoElement.currentTime)) {
+        return { isActive: true, seconds: videoElement.currentTime };
+      }
+      return null;
+    }
     function getYouTubeContext(url) {
       logFunctionBegin("getYouTubeContext");
       if (!url || !isYouTubeUrl(url)) {
@@ -4368,9 +4411,13 @@ ${textLink}`;
         return fallbackContext;
       }
       if (youtubeContextCacheKey === intent.key && youtubeContextCacheValue) {
-        log("Using cached YouTube context");
+        const refreshed = Object.assign({}, youtubeContextCacheValue, {
+          playback: readYouTubePlaybackState(toolkit)
+        });
+        youtubeContextCacheValue = refreshed;
+        log(`Using cached YouTube context with refreshed playback (seconds=${refreshed.playback ? refreshed.playback.seconds : "n/a"})`);
         logFunctionEnd("getYouTubeContext");
-        return youtubeContextCacheValue;
+        return refreshed;
       }
       const pageStateExtractor = toolkit?.Extractors?.PageState;
       const videoExtractor = toolkit?.Extractors?.Video;
@@ -4470,7 +4517,7 @@ ${textLink}`;
       const timestampDisplay = formatSecondsAsTimestamp(seconds) || `${Math.floor(seconds)}s`;
       const decoratedBaseTitle = baseTitle || context.video.title || "YouTube Video";
       const decoratedTitle = `${decoratedBaseTitle} @ ${timestampDisplay}`;
-      const timestampUrl = buildYouTubeTimestampUrl(shortBase, `${Math.floor(seconds)}`);
+      const timestampUrl = buildYouTubeTimestampUrl(shortBase, formatSecondsAsUrlTimestamp(seconds) || `${Math.floor(seconds)}s`);
       if (!timestampUrl) {
         log("Failed to build timestamp URL");
         logFunctionEnd("buildYouTubeTimestampMenuOptions");

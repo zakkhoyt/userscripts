@@ -730,13 +730,10 @@
             return null;
         }
 
+        // No cache read here on purpose. `context` above was just built from live DOM
+        // reads including the current playback position, so returning a previously
+        // cached copy would discard that and serve a stale timestamp.
         const cacheKey = videoId ? `fallback-video:${videoId}` : `fallback-url:${canonicalUrl}`;
-        if (cacheKey && youtubeContextCacheKey === cacheKey && youtubeContextCacheValue) {
-            log('Using cached fallback YouTube context');
-            logFunctionEnd('buildYouTubeFallbackContext');
-            return youtubeContextCacheValue;
-        }
-
         if (cacheKey) {
             youtubeContextCacheKey = cacheKey;
         }
@@ -799,6 +796,41 @@
             return `${hours}:${paddedMinutes}:${paddedSeconds}`;
         }
         return `${paddedMinutes}:${paddedSeconds}`;
+    }
+
+    /**
+     * Formats a playback offset as a YouTube `t=` parameter value using the shortest
+     * readable `#h#m#s` form instead of a bare seconds count.
+     *
+     * A bare `t=555` is opaque to a human reading the link; `t=9m15s` is not.
+     *
+     * Emits only the divisions that carry a value, with no zero padding:
+     * a zero division is dropped entirely, including an interior one
+     * (`3607s` -> `1h7s`, not `1h0m7s`). A zero offset yields `0s`.
+     *
+     * @param {number} seconds - Playback offset in seconds
+     * @returns {string|null} Parameter value (examples: `7s`, `9m15s`, `1h7s`, `1h`), or null when invalid
+     * Reference: https://support.google.com/youtube/answer/57792
+     */
+    function formatSecondsAsUrlTimestamp(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) {
+            return null;
+        }
+        const totalSeconds = Math.floor(seconds);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+        const parts = [];
+        if (hours > 0) {
+            parts.push(`${hours}h`);
+        }
+        if (minutes > 0) {
+            parts.push(`${minutes}m`);
+        }
+        if (secs > 0) {
+            parts.push(`${secs}s`);
+        }
+        return parts.length > 0 ? parts.join('') : '0s';
     }
 
     /**
@@ -943,6 +975,34 @@
     }
 
     /**
+     * Reads the CURRENT playback position straight from the page.
+     *
+     * Playback is the one piece of YouTube context that changes while the page stays
+     * put, so it must never be served from `youtubeContextCacheValue` — the cache is
+     * keyed on video identity, which does not change as the video plays. Caching it
+     * made every menu invocation after the first report the first timestamp.
+     *
+     * @param {object|null} toolkit - YouTube toolkit, when available
+     * @returns {{isActive: boolean, seconds: number}|null} Live playback state, or null when unavailable
+     */
+    function readYouTubePlaybackState(toolkit) {
+        const videoExtractor = toolkit?.Extractors?.Video;
+        if (videoExtractor && typeof videoExtractor.extractPlaybackState === 'function') {
+            const extracted = videoExtractor.extractPlaybackState(document);
+            if (extracted && Number.isFinite(extracted.seconds)) {
+                return extracted;
+            }
+        }
+        // Fall back to the media element directly — the toolkit may be absent, and on a
+        // watch page the <video> element is the source of truth anyway.
+        const videoElement = document.querySelector('video');
+        if (videoElement && typeof videoElement.currentTime === 'number' && Number.isFinite(videoElement.currentTime)) {
+            return { isActive: true, seconds: videoElement.currentTime };
+        }
+        return null;
+    }
+
+    /**
      * Builds (and caches) YouTube metadata for the current page when applicable
      * @param {string|null} url - URL associated with the user action
      * @returns {object|null} Extracted metadata (video/channel/playlist)
@@ -972,9 +1032,15 @@
         }
 
         if (youtubeContextCacheKey === intent.key && youtubeContextCacheValue) {
-            log('Using cached YouTube context');
+            // Static metadata (title, channel, URLs) is safe to reuse; playback is not.
+            // Re-read it so timestamp links track the current position.
+            const refreshed = Object.assign({}, youtubeContextCacheValue, {
+                playback: readYouTubePlaybackState(toolkit)
+            });
+            youtubeContextCacheValue = refreshed;
+            log(`Using cached YouTube context with refreshed playback (seconds=${refreshed.playback ? refreshed.playback.seconds : 'n/a'})`);
             logFunctionEnd('getYouTubeContext');
-            return youtubeContextCacheValue;
+            return refreshed;
         }
 
         const pageStateExtractor = toolkit?.Extractors?.PageState;
@@ -1050,7 +1116,7 @@
     /**
      * Appends (or replaces) the t= query parameter in a URL for timestamp links
      * @param {string} baseUrl - URL to modify
-     * @param {string} timestampValue - Value for the t parameter (examples: 283, 283s, 4m43s)
+     * @param {string} timestampValue - Value for the t parameter (examples: 45s, 4m43s, 1h2m3s)
      * @returns {string|null} URL with timestamp parameter applied
      */
     function buildYouTubeTimestampUrl(baseUrl, timestampValue) {
@@ -1109,7 +1175,7 @@
         const timestampDisplay = formatSecondsAsTimestamp(seconds) || `${Math.floor(seconds)}s`;
         const decoratedBaseTitle = baseTitle || context.video.title || 'YouTube Video';
         const decoratedTitle = `${decoratedBaseTitle} @ ${timestampDisplay}`;
-        const timestampUrl = buildYouTubeTimestampUrl(shortBase, `${Math.floor(seconds)}`);
+        const timestampUrl = buildYouTubeTimestampUrl(shortBase, formatSecondsAsUrlTimestamp(seconds) || `${Math.floor(seconds)}s`);
         if (!timestampUrl) {
             log('Failed to build timestamp URL');
             logFunctionEnd('buildYouTubeTimestampMenuOptions');

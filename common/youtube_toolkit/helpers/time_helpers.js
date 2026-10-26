@@ -80,11 +80,38 @@ function parseISODuration(isoDuration) {
     return totalSeconds > 0 ? totalSeconds : null;
 }
 
+/**
+ * Builds a YouTube `t=` query parameter using the shortest readable `#h#m#s` form.
+ *
+ * A bare seconds count (`t=555`) is opaque once past a minute; `t=9m15s` is not.
+ *
+ * Emits only the divisions that carry a value, with no zero padding. A zero
+ * division is dropped entirely, including an interior one
+ * (`3607s` -> `t=1h7s`, not `t=1h0m7s`).
+ *
+ * @param {number} seconds - Playback offset in seconds
+ * @returns {string|null} Parameter string (e.g. `t=9m15s`, `t=1h7s`), or null when invalid
+ * Reference: https://support.google.com/youtube/answer/57792
+ */
 function formatTimestampParam(seconds) {
     if (!Number.isFinite(seconds) || seconds <= 0) {
         return null;
     }
-    return `t=${Math.floor(seconds)}s`;
+    const wholeSeconds = Math.floor(seconds);
+    const hours = Math.floor(wholeSeconds / 3600);
+    const minutes = Math.floor((wholeSeconds % 3600) / 60);
+    const secs = wholeSeconds % 60;
+    const parts = [];
+    if (hours > 0) {
+        parts.push(`${hours}h`);
+    }
+    if (minutes > 0) {
+        parts.push(`${minutes}m`);
+    }
+    if (secs > 0) {
+        parts.push(`${secs}s`);
+    }
+    return parts.length > 0 ? `t=${parts.join('')}` : null;
 }
 
 module.exports = {
